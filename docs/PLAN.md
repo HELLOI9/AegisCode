@@ -1329,7 +1329,7 @@ git commit -m "feat: governed dispatcher (path fence + tiers + no-exec on DENY/A
 
 ---
 
-### Task 13: Command lexer + structure-safety layer (甲, layers 1–2)
+### Task 13: Command lexer + structure-safety layer (甲, layers 1–2) ✅ DONE (9f1b33c, fix 40bc08c)
 
 **Files:**
 - Create: `aegiscode/governance/command_lexer.py`, `tests/governance/test_command_lexer.py`
