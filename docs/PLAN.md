@@ -290,6 +290,13 @@ def test_env_overrides_provider_and_model(tmp_path):
     cfg = load_config(str(tmp_path / "aegis.yaml"),
                       env={"AEGIS_LLM_PROVIDER": "anthropic", "AEGIS_LLM_MODEL": "claude-x"})
     assert cfg.llm.provider == "anthropic" and cfg.llm.model == "claude-x"
+
+def test_env_none_reads_os_environ(tmp_path, monkeypatch):
+    # env=None must fall back to os.environ (SPEC §11 M11); guard the default branch.
+    (tmp_path / "aegis.yaml").write_text("llm:\n  provider: openai\n  model: gpt-4o\n")
+    monkeypatch.setenv("AEGIS_LLM_MODEL", "claude-from-os-env")
+    cfg = load_config(str(tmp_path / "aegis.yaml"))   # env omitted → None → os.environ
+    assert cfg.llm.model == "claude-from-os-env"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2208,7 +2215,7 @@ git commit -m "feat: termination reasons (9) + counting-tier decide_termination"
 ### Task 23: HarnessCore main loop (integration)
 
 **Files:**
-- Create: `aegiscode/loop/harness.py`, `tests/loop/test_harness.py`
+- Create: `aegiscode/loop/harness.py`, `tests/loop/test_harness.py`, **`tests/helpers.py`** (the shared test factory; Step 1 imports `make_harness` from it, and Tasks 26/27 later extend it with `make_service`/`make_api_client`)
 
 **Interfaces:**
 - Consumes: `LLMClient`, `parse_action`/`ActionParseError`, `Dispatcher`, `PolicyEngine`, `judge_command`, `classify`, `ProgressTracker`, `fingerprint`, `AuditLog`, `build_context`, `decide_termination`, `LoopCounters`, `TerminationReason`, `RunTestsTool`.
