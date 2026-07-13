@@ -86,3 +86,14 @@
 - **两阶段评审**:spec ✅、quality Approved。1 Important(2 处 open().read() 泄漏句柄,与 T2 同类 bug;WriteFileTool 已用 with)+2 Minor(ListFilesTool 零测试覆盖、ReadFileTool 坏路径抛裸异常违反 ToolResult 契约)。全部在 4e9a98f 修:两读改 with、ReadFileTool 坏路径返回 TOOL_ERROR 结构化结果、补 ListFilesTool+坏路径测试。44 passed。
 - **人工干预**:控制器决定合并修 Important+2 Minor(句柄泄漏是重复 bug 类;坏路径必须走 ToolResult 契约否则主循环会崩而非收到 TOOL_ERROR 反馈)。
 - **里程碑**:Milestone 1(决策与工具基座)5 个 task 全部完成。下一步:全分支最终评审(opus)→ PR。
+
+### 全分支最终评审(Milestone 1)— READY TO MERGE
+- **评审 subagent**:opus。范围 fac0127..2515d1e,14 commits。
+- **结论**:READY TO MERGE。发现 1 Important + 3 Minor,当场在 4cd0081 修:
+  - **Important**:文件工具错误契约不一致——ReadFileTool(T9 修过)返回 TOOL_ERROR,但 ListFilesTool/WriteFileTool 仍让 OSError 逃逸 run()。全分支视角才暴露(单 task 评审看不到)。三工具统一为 ToolResult(TOOL_ERROR)。
+  - Minor:WriteFileTool 写入 pin encoding=utf-8(与 size check 的 encode 一致);ToolResult status/category 改 Literal 类型(拼写错误在校验期即报,SPEC §M9 八类 taxonomy,主循环靠它分支)。
+  - +4 回归测试(list 缺目录、write 不可写路径、bad status、bad category)。48 passed。
+- **延后(不阻塞)**:T6 Anthropic system=""(API 接受,won't-fix);_real_post 函数内 import(对离线确定性反而是优点);registry 注解(价值低)。
+- **多轮记录/status 分类等覆盖建议**:opus 建议后续加 MockLLM 多轮 received_messages[2] 断言(demo② 依赖)——记入 M4 主循环时补。
+- **人工干预**:控制器决定合并修 Important+2 Minor(错误契约是主循环安全网的关键一致性;Literal 让控制流 seam 防拼写错)。
+- **下一步**:PR + merge;之后 Milestone 2(治理,main contribution)。
