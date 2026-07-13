@@ -434,7 +434,7 @@ git commit -m "feat: config schema + YAML loader with validation"
 
 ---
 
-### Task 3: Redactor (deterministic secret/path scrubber)
+### Task 3: Redactor (deterministic secret/path scrubber) ✅ DONE (aa8111d, +f214e4c)
 
 **Files:**
 - Create: `aegiscode/security/__init__.py`, `aegiscode/security/redactor.py`, `tests/security/test_redactor.py`
