@@ -34,7 +34,8 @@ aegiscode/
   security/
     redactor.py        # deterministic secret/path redaction (T3)
   persistence/
-    db.py              # sqlite3 connection, schema DDL, WAL (T4)
+    db.py              # sqlite3 connection, schema loading, WAL (T4)
+    schema.sql         # DDL for all 6 tables, loaded by db.py (T4)
     repositories.py    # tasks/steps/approvals/audit/memories CRUD (T26)
   llm/
     base.py            # LLMClient interface (T5)
@@ -2471,10 +2472,11 @@ git commit -m "feat: self-written secret scanner (CI + self-check)"
 
 **Files:**
 - Create: `aegiscode/service/__init__.py`, `aegiscode/service/app_service.py`, `aegiscode/persistence/repositories.py`, `tests/service/test_app_service.py`
+- Modify: `tests/helpers.py` — **add `make_service(tmp_path, scripted, final_ok, sync=False)`** (wires a MockLLM-backed `HarnessCore` via `harness_factory` + a temp sqlite `ApplicationService`; `sync=True` runs the loop inline for deterministic tests). This extends the `tests/helpers.py` created in Task 23.
 
 **Interfaces:**
 - Consumes: `HarnessCore`, `open_db`, `AuditLog`, `AegisConfig`.
-- Produces: `class ApplicationService(db, config, harness_factory)` with `create_task(workspace, description) -> task_id` (runs loop in a background thread, persists state each turn), `get_task(task_id) -> dict`, `get_events(task_id, since:int) -> list`, `list_approvals(task_id) -> list`, `decide(approval_id, approved) -> None`, `cancel(task_id) -> None`, `get_audit(task_id) -> dict` (events + `verify_chain`). Repositories provide row CRUD.
+- Produces: `class ApplicationService(db, config, harness_factory)` with `create_task(workspace, description) -> task_id` (runs loop in a background thread, or inline when constructed in sync mode, persisting state each turn), `get_task(task_id) -> dict`, `get_events(task_id, since:int) -> list`, `list_approvals(task_id) -> list`, `decide(approval_id, approved) -> None`, `cancel(task_id) -> None`, `get_audit(task_id) -> dict` (events + `verify_chain`, exposes `chain_valid: bool`). Repositories provide row CRUD. Also `make_service` test helper (see Files).
 
 - [ ] **Step 1: Write the failing test** (synchronous mode via injected executor for determinism)
 ```python
@@ -2523,6 +2525,7 @@ git commit -m "feat: ApplicationService + repositories (create/query/approve/aud
 
 **Files:**
 - Create: `aegiscode/service/api.py`, `tests/service/test_api.py`
+- Modify: `tests/helpers.py` — **add `make_api_client(tmp_path, scripted, final_ok)`** returning a `fastapi.testclient.TestClient` wrapping `build_app(service)` over a `make_service(...)` instance. Reused by Task 28.
 
 **Interfaces:**
 - Consumes: `ApplicationService`.

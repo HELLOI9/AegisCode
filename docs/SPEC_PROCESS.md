@@ -638,3 +638,37 @@
 本轮修订暂**未提交**，待用户指示统一提交。两个验证 worktree 暂保留待后续删除。
 
 ---
+
+# 第三次冷启动验证（§4.5）：一次"假警报"暴露的流程陷阱 + 两处真实补漏
+
+> 第二轮修订提交后（`e23553f`），再派第三个全新子智能体（新隔离 worktree `agent-a899e0e3`）复验。
+
+## 一、关键流程教训：worktree 基于过时的 origin，导致整份报告的头号"缺陷"是假警报
+
+- 子智能体隔离 worktree 默认从 **`origin/main`** 分叉（baseRef=fresh），而我的两个修订提交（`8e9451b`、`e23553f`）**尚未 push**，origin 落后。
+- 于是第三个子智能体验证的是**修订前的旧文档**：它花大篇幅"发现"了 D-CS8（pip 不在 allowlist、黄金路径 DENY），并判 GOLDEN PATH = FAIL——**但这早在第二轮 `e23553f` 修好了**。
+- 核实:当前 main 的 SPEC.md line 221 = `[python, python3, pip, pytest, ...]`（含 pip）；而该 worktree 的 SPEC.md 仍是旧的无 pip 版本。→ 报告的头号缺陷是**假警报**。
+- **教训 5（流程·重要）**：冷启动验证前必须让被验证的提交对 worktree 可见——要么先 `git push`（使 origin/main 最新），要么显式让 worktree 基于本地 HEAD。否则"陌生 agent 验证"验的是旧版本，白跑且产生误导性 FAIL。本轮即栽于此。
+
+## 二、复验通过项（当前 main 已修，worktree 因过时而误报为 FAIL 的，全部实为 PASS）
+
+- pip 已入 command_allowlist（假警报 D-CS8）。
+- T23 两处依赖已统一含 T21（假警报 D 项）。
+- bootstrap 已 conda/uv/venv 三选并注明 python3.12-venv 前置（假警报 C/E 项之一）。
+- 其余 B/C/F（extra=forbid+枚举、Decision 单一真源、环境变量）在旧版即已 PASS，本轮继续 PASS。
+
+## 三、本轮仍挖出的两处真实缺陷（第二轮未碰，对当前 main 成立）——已修
+
+**D-CS13【中·真实】测试 helper 无创建归属。** Task 26 import `make_service`、Task 27/28 import `make_api_client`,但只有 Task 23 创建 `tests/helpers.py` 的 `make_harness`,没有任务把这两个 helper 列为交付物。陌生实现者到 Task 26 会遇到未定义的 `make_service`。→ 已修:Task 26 Files 增 "Modify tests/helpers.py 加 make_service"；Task 27 Files 增 "Modify tests/helpers.py 加 make_api_client"，并在 Interfaces 注明。
+
+**D-CS14【轻·真实】`schema.sql` 不在 File Structure map。** Task 4 实际创建 `persistence/schema.sql`（db.py 读它），但 File Structure 只列 `db.py`。→ 已修:File Structure persistence 段补 `schema.sql` 行。
+
+## 四、结论
+
+- 本轮**没有发现任何 correctness 级新缺陷**;头号"FAIL"是过时 base 造成的假警报,真实新问题仅 2 处 planning 层补漏,均已修。
+- 综合三轮:规约的核心机制（治理四档、命令词法、路径围栏、黄金路径 pip→审批、config 严格校验、Decision 单源）已被独立陌生 agent 反复验证为一致且可实现。
+- **最重要的一次收获是流程教训 5**：以后跑冷启动前先 push（或基于本地 HEAD 建 worktree），否则验证无效。
+
+本轮补漏修订与本记录一并提交。验证 worktree 按用户指示删除。
+
+---
