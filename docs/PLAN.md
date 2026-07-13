@@ -1150,7 +1150,7 @@ git commit -m "feat: governance Decision enum + ordered first-match PolicyEngine
 
 ---
 
-### Task 11: Path fence (乙) — realpath ownership + sensitive-file blacklist
+### Task 11: Path fence (乙) — realpath ownership + sensitive-file blacklist ✅ DONE (fd91949, +1cde65e)
 
 **Files:**
 - Create: `aegiscode/governance/path_fence.py`, `tests/governance/test_path_fence.py`
