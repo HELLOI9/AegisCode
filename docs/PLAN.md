@@ -31,45 +31,46 @@ aegiscode/
   config/
     schema.py          # Pydantic config models (T2)
     loader.py          # YAML load + validate + env overrides (T2)
-  persistence/
-    db.py              # sqlite3 connection, schema DDL, migrations (T3)
-    repositories.py    # tasks/steps/approvals/audit/memories CRUD (T3, extended later)
   security/
-    redactor.py        # deterministic secret/path redaction (T4)
+    redactor.py        # deterministic secret/path redaction (T3)
+  persistence/
+    db.py              # sqlite3 connection, schema DDL, WAL (T4)
+    repositories.py    # tasks/steps/approvals/audit/memories CRUD (T26)
   llm/
-    base.py            # LLMClient interface + Message types (T5)
+    base.py            # LLMClient interface (T5)
     mock.py            # MockLLM scripted queue + message recorder (T5)
     openai_adapter.py  # OpenAIAdapter (T6)
     anthropic_adapter.py # AnthropicAdapter (T6)
-  action/
-    model.py           # Action Pydantic model (T7)
+  protocol/
+    action.py          # Action Pydantic model (T7)
     parser.py          # robust JSON extraction + validation → INVALID_ACTION (T7)
   tools/
-    base.py            # Tool interface, ToolResult model (T8)
-    registry.py        # registration + lookup + dispatch (T8)
+    base.py            # Tool interface (T8)
+    result.py          # ToolResult model (T8)
+    registry.py        # registration + lookup (T8)
     file_tools.py      # list_files/read_file/search_text/write_file (T9)
-    command_tool.py    # run_command executor (shell=False) (T14)
-    run_tests_tool.py  # run_tests sensor (T15)
-    finish_tool.py     # finish control tool (T8)
+    command_tool.py    # run_command executor (shell=False) (T16)
+    run_tests_tool.py  # run_tests sensor (T17)
+    finish_tool.py     # finish control tool (T17)
   governance/
-    decision.py        # Decision enum + GovernanceResult + PolicyRule (T10)
-    engine.py          # ordered first-match policy engine + default tiers (T10)
+    decision.py        # Decision enum (T10)
+    engine.py          # ordered first-match PolicyEngine (T10)
     path_fence.py      # 乙 realpath + membership + sensitive blacklist (T11)
-    command_lexer.py   # 甲 shlex parse + metacharacter structure detection (T12)
-    command_rules.py   # 甲 allowlist + dangerous-arg rules (T13)
-    approval.py        # HITL ApprovalRequest + state machine (T16)
-    fingerprint.py     # action fingerprint (approval + no-progress) (T17)
+    dispatcher.py      # governed dispatcher (path fence + tiers + no-exec on DENY/APPROVAL) (T12)
+    command_lexer.py   # 甲 shlex parse + metastructure detection (T13)
+    command_rules.py   # 甲 allowlist + dangerous-arg rules (T14)
+    approval.py        # HITL ApprovalRequest state machine + `fingerprint()` helper (T15)
   feedback/
-    classifier.py      # 8-class failure classification + ToolResult views (T18)
+    classifier.py      # 8-class failure classification + ProgressTracker (T18)
     pytest_parser.py   # pytest output → concise detail_for_llm (T18)
   audit/
-    events.py          # AuditEvent model + event_type enum (T19)
-    chain.py           # SHA256 hash chain + verify_chain (T19)
+    events.py          # EventType enum (T19)
+    chain.py           # AuditLog: SHA256 hash chain + verify_chain (T19)
   memory/
-    store.py           # memories write(redacted)/retrieve(type+project+topK) (T20)
-    context_builder.py # 6-tier budget assembly + deterministic summarize (T21)
+    store.py           # memories write(secret-refused)/retrieve(type+project+topK) (T20)
+    context_builder.py # 6-tier budget assembly + deterministic summarize_step (T21)
   loop/
-    termination.py     # TerminationReason enum + priority decision (T22)
+    termination.py     # TerminationReason enum + LoopCounters + decide_termination (T22)
     harness.py         # HarnessCore main loop (T23)
   credentials/
     store.py           # keyring/.env/env layered store (T24)
@@ -87,28 +88,43 @@ Makefile               # make test (T1)
 aegis.yaml             # sample config (T2)
 ```
 
+> **Note on `fingerprint()`:** the action-fingerprint helper (used by approval-supersede and no-progress detection) lives in `governance/approval.py` (T15). There is no standalone `fingerprint.py` file.
+
+## Environment Bootstrap (do this once, before Task 1)
+
+Every task's Step 2 uses `pytest`, so `pytest` must exist before Step 2 can produce the predicted "module not found: aegiscode" failure. On a cold machine:
+
+```bash
+python3.12 -m venv .venv           # or `conda create -p ./.condaenv python=3.12`
+source .venv/bin/activate
+python -m pip install --upgrade pip pytest
+```
+
+After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the manual `pytest` install. If your Python is not 3.12, install pyenv/uv/conda first — the plan does not target other versions.
+
 ## Dependency Graph & Parallelization
 
 **Milestone 0 — Foundations**
 - T1 scaffold → blocks everything.
-- After T1, parallel: **T2 config**, **T3 persistence**, **T4 redactor**.
+- After T1, parallel: **T2 config**, **T3 redactor**, **T4 persistence**.
 
 **Milestone 1 — Decision & Tools substrate**
 - T5 LLM base+Mock (after T1) ∥ T7 action model+parser (after T1).
 - T6 real adapters (after T5).
 - T8 tool base+registry+finish (after T1) → T9 file tools (after T8).
 
-**Milestone 2 — Governance (main contribution, 5 split tasks)**
-- T10 decision+engine (after T1) → prerequisite for T11–T13, T16.
-- **T11 path fence** ∥ **T12 command lexer** (both after T10).
-- T13 command rules (after T12).
-- T16 approval state machine (after T10) ∥ T17 fingerprint (after T1).
-- T14 command tool executor (after T13) ∥ T15 run_tests (after T8).
+**Milestone 2 — Governance (main contribution, 6 split tasks)**
+- T10 decision+engine (after T1) → prerequisite for T11, T12, T15.
+- **T11 path fence** ∥ **T13 command lexer** (both after T1; T11 also needs T10 for verdict types).
+- T12 governed dispatcher (after T10, T11, T8).
+- T14 command rules (after T13).
+- T15 approval state machine + `fingerprint()` (after T10).
+- T16 command tool executor (after T14, T8) ∥ T17 run_tests + finish (after T8).
 
 **Milestone 3 — Feedback / Audit / Memory**
-- T18 feedback classifier (after T4, T8) — pytest parser included.
-- T19 audit chain (after T3, T4) .
-- T20 memory store (after T3, T4) → T21 context builder (after T20).
+- T18 feedback classifier + pytest parser (after T3 redactor, T8).
+- T19 audit chain (after T3 redactor, T4 persistence).
+- T20 memory store (after T4 persistence, T25 scanner) → T21 context builder (after T20).
 
 **Milestone 4 — Core loop**
 - T22 termination (after T1).
@@ -118,14 +134,15 @@ aegis.yaml             # sample config (T2)
 - T24 credential store ∥ T25 secret scanner (both after T1).
 
 **Milestone 6 — Service / Interface**
-- T26 app service (after T23, T3) → T27 REST API (after T26) → T28 WebUI (after T27).
+- T26 app service (after T23, T4 persistence) → T27 REST API (after T26) → T28 WebUI (after T27).
 - T29 CLI (after T23, T24) — parallel with T27/T28.
 
 **Milestone 7 — Distribution & Demos**
 - T30 Dockerfile (after T27) ∥ T32 CI (after T1, needs make test).
 - T31 mechanism demos (after T23 + governance set).
 
-**Parallel-safe worktree groups:** {T2,T3,T4} · {T5,T7,T8} · {T11,T12} · {T16,T17} · {T24,T25}.
+**Parallel-safe worktree groups:** {T2,T3,T4} · {T5,T7,T8} · {T11,T13} · {T16,T17} · {T24,T25}.
+(T25 scanner should precede T20 memory store — T20 imports `scan_text`.)
 
 ---
 
@@ -150,8 +167,10 @@ def test_package_version():
 
 - [ ] **Step 2: Run test to verify it fails**
 
+Prereq: complete the "Environment Bootstrap" block above (pytest must be installed).
 Run: `pytest tests/test_smoke.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'aegiscode'`
+(If instead you see `No module named pytest`, you skipped the bootstrap; run it and re-try Step 2.)
 
 - [ ] **Step 3: Write minimal implementation**
 ```toml
@@ -201,7 +220,7 @@ git commit -m "chore: project scaffold + make test"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `AegisConfig` (Pydantic model, fields per SPEC §11 M11 YAML: `workspace`, `limits`, `tools`, `feedback`, `governance`, `memory`, `credentials`, `llm`); `load_config(path: str, env: dict|None=None) -> AegisConfig` raising `ConfigError` on invalid YAML.
+- Produces: `AegisConfig` (Pydantic model, fields per SPEC §11 M11 YAML: `workspace`, `limits`, `tools`, `feedback`, `governance`, `memory`, `credentials`, `llm`) with **`extra="forbid"` on every nested model** (SPEC M11 边界); `CommandRule(BaseModel)` with fields `argv0: str`, `args_contain: list[str] = []`, `decision: Decision` (a `str, Enum` of the four tiers, defined in this task); `DefaultDecisions.readonly/write/command` typed as the same `Decision` enum. `load_config(path: str, env: dict|None=None) -> AegisConfig`: when `env is None`, defaults to `os.environ`; recognizes exactly two overrides — `AEGIS_LLM_PROVIDER` and `AEGIS_LLM_MODEL`; raises `ConfigError` on any invalid YAML or Pydantic validation failure (including unknown fields, wrong types, out-of-enum values).
 
 - [ ] **Step 1: Write the failing test**
 ```python
@@ -215,27 +234,78 @@ def test_loads_defaults_and_overrides(tmp_path):
         "limits:\n  max_steps: 25\n  max_consecutive_failures: 5\n  no_progress_repeat_limit: 3\n"
         "llm:\n  provider: openai\n  model: gpt-4o\n"
     )
-    cfg = load_config(str(tmp_path / "aegis.yaml"))
+    cfg = load_config(str(tmp_path / "aegis.yaml"), env={})
     assert cfg.limits.max_steps == 25
-    assert cfg.governance.default_decisions.command == "DENY"  # built-in default
+    assert cfg.governance.default_decisions.command == "DENY"
 
-def test_invalid_field_raises(tmp_path):
+def test_unknown_top_level_field_raises(tmp_path):
+    (tmp_path / "aegis.yaml").write_text("bogus_top_field: 1\n")
+    with pytest.raises(ConfigError):
+        load_config(str(tmp_path / "aegis.yaml"), env={})
+
+def test_unknown_nested_field_raises(tmp_path):
+    (tmp_path / "aegis.yaml").write_text("governance:\n  totally_made_up: true\n")
+    with pytest.raises(ConfigError):
+        load_config(str(tmp_path / "aegis.yaml"), env={})
+
+def test_bad_decision_tier_raises(tmp_path):
+    (tmp_path / "aegis.yaml").write_text(
+        "governance:\n  default_decisions:\n    command: NONSENSE_TIER\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(str(tmp_path / "aegis.yaml"), env={})
+
+def test_command_rules_flat_shape(tmp_path):
+    (tmp_path / "aegis.yaml").write_text(
+        "governance:\n  command_rules:\n"
+        "    - {argv0: pip, args_contain: [install], decision: REQUIRE_APPROVAL}\n"
+    )
+    cfg = load_config(str(tmp_path / "aegis.yaml"), env={})
+    assert cfg.governance.command_rules[0].argv0 == "pip"
+    assert cfg.governance.command_rules[0].decision == "REQUIRE_APPROVAL"
+
+def test_command_rules_reject_nested_match(tmp_path):
+    (tmp_path / "aegis.yaml").write_text(
+        "governance:\n  command_rules:\n"
+        "    - {match: {argv0: git, args_contain: [push]}, decision: DENY}\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(str(tmp_path / "aegis.yaml"), env={})
+
+def test_type_error_raises(tmp_path):
     (tmp_path / "aegis.yaml").write_text("limits:\n  max_steps: not_an_int\n")
     with pytest.raises(ConfigError):
-        load_config(str(tmp_path / "aegis.yaml"))
+        load_config(str(tmp_path / "aegis.yaml"), env={})
+
+def test_env_overrides_provider_and_model(tmp_path):
+    (tmp_path / "aegis.yaml").write_text("llm:\n  provider: openai\n  model: gpt-4o\n")
+    cfg = load_config(str(tmp_path / "aegis.yaml"),
+                      env={"AEGIS_LLM_PROVIDER": "anthropic", "AEGIS_LLM_MODEL": "claude-x"})
+    assert cfg.llm.provider == "anthropic" and cfg.llm.model == "claude-x"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
+Prereq: environment bootstrap done.
 Run: `pytest tests/config/test_loader.py -v`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write minimal implementation**
 ```python
 # aegiscode/config/schema.py
-from pydantic import BaseModel
+from enum import Enum
+from pydantic import BaseModel, ConfigDict
 
-class Limits(BaseModel):
+class Decision(str, Enum):
+    ALLOW = "ALLOW"
+    ALLOW_WITH_AUDIT = "ALLOW_WITH_AUDIT"
+    REQUIRE_APPROVAL = "REQUIRE_APPROVAL"
+    DENY = "DENY"
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+class Limits(_Strict):
     max_steps: int = 25
     max_consecutive_failures: int = 5
     no_progress_repeat_limit: int = 3
@@ -243,42 +313,47 @@ class Limits(BaseModel):
     command_timeout_sec: int = 30
     output_max_bytes: int = 65536
 
-class DefaultDecisions(BaseModel):
-    readonly: str = "ALLOW"
-    write: str = "REQUIRE_APPROVAL"
-    command: str = "DENY"
+class DefaultDecisions(_Strict):
+    readonly: Decision = Decision.ALLOW
+    write: Decision = Decision.REQUIRE_APPROVAL
+    command: Decision = Decision.DENY
 
-class Governance(BaseModel):
+class CommandRule(_Strict):
+    argv0: str
+    args_contain: list[str] = []
+    decision: Decision
+
+class Governance(_Strict):
     command_allowlist: list[str] = ["python", "python3", "pytest", "ruff", "mypy", "git", "ls", "cat"]
-    command_rules: list[dict] = []
+    command_rules: list[CommandRule] = []
     sensitive_file_patterns: list[str] = [".env", ".git/", "*.pem", "*.key", "*credentials*"]
     write_allowlist_dirs: list[str] = ["src/", "tests/"]
     default_decisions: DefaultDecisions = DefaultDecisions()
 
-class Workspace(BaseModel):
+class Workspace(_Strict):
     root: str = "/workspace"
 
-class Tools(BaseModel):
+class Tools(_Strict):
     enabled: list[str] = ["list_files","read_file","search_text","write_file","run_tests","run_command","finish"]
     write_max_bytes: int = 1048576
 
-class Feedback(BaseModel):
+class Feedback(_Strict):
     test_command: str = "pytest -q"
     target_tests: str = "tests/"
 
-class Memory(BaseModel):
+class Memory(_Strict):
     retrieval_top_k: int = 8
     context_budget_chars: int = 24000
 
-class Credentials(BaseModel):
+class Credentials(_Strict):
     allow_dotenv: bool = False
 
-class Llm(BaseModel):
+class Llm(_Strict):
     provider: str = "openai"
     model: str = "gpt-4o"
     base_url: str | None = None
 
-class AegisConfig(BaseModel):
+class AegisConfig(_Strict):
     workspace: Workspace = Workspace()
     limits: Limits = Limits()
     tools: Tools = Tools()
@@ -290,22 +365,26 @@ class AegisConfig(BaseModel):
 ```
 ```python
 # aegiscode/config/loader.py
+import os
 import yaml
 from pydantic import ValidationError
 from .schema import AegisConfig
 
 class ConfigError(Exception): ...
 
+# Exactly two env-var overrides are recognized (SPEC §11 M11):
+_ENV_MAP = {"AEGIS_LLM_PROVIDER": ("llm", "provider"),
+            "AEGIS_LLM_MODEL":    ("llm", "model")}
+
 def load_config(path: str, env: dict | None = None) -> AegisConfig:
     try:
         raw = yaml.safe_load(open(path, encoding="utf-8")) or {}
     except yaml.YAMLError as e:
         raise ConfigError(f"invalid YAML: {e}") from e
-    env = env or {}
-    if "AEGIS_LLM_PROVIDER" in env:
-        raw.setdefault("llm", {})["provider"] = env["AEGIS_LLM_PROVIDER"]
-    if "AEGIS_LLM_MODEL" in env:
-        raw.setdefault("llm", {})["model"] = env["AEGIS_LLM_MODEL"]
+    src = os.environ if env is None else env
+    for key, (section, field) in _ENV_MAP.items():
+        if key in src:
+            raw.setdefault(section, {})[field] = src[key]
     try:
         return AegisConfig(**raw)
     except ValidationError as e:
@@ -965,8 +1044,8 @@ git commit -m "feat: file tools (list/read/search/write) with binary skip + size
 - Create: `aegiscode/governance/__init__.py`, `aegiscode/governance/decision.py`, `aegiscode/governance/engine.py`, `tests/governance/test_engine.py`
 
 **Interfaces:**
-- Consumes: `Action`.
-- Produces: `class Decision(str, Enum)` = ALLOW / ALLOW_WITH_AUDIT / REQUIRE_APPROVAL / DENY; `@dataclass PolicyRule(rule_id:str, matcher:Callable[[Action,ctx],bool], decision:Decision, reason:str)`; `@dataclass GovernanceVerdict(decision, rule_id, reason)`; `class PolicyEngine(rules:list[PolicyRule], default_fn:Callable)` with `evaluate(action, ctx)->GovernanceVerdict` (first matching rule wins; else `default_fn`).
+- Consumes: `Action`, `Decision` (the canonical enum defined in Task 2 `aegiscode/config/schema.py`).
+- Produces: `aegiscode/governance/decision.py` **re-exports** the canonical `Decision` (single source of truth is `config/schema.py`, created earlier in Task 2) so governance code can `from aegiscode.governance.decision import Decision`; `@dataclass PolicyRule(rule_id:str, matcher:Callable[[Action,ctx],bool], decision:Decision, reason:str)`; `@dataclass GovernanceVerdict(decision, rule_id, reason)`; `class PolicyEngine(rules:list[PolicyRule], default_fn:Callable)` with `evaluate(action, ctx)->GovernanceVerdict` (first matching rule wins; else `default_fn`).
 
 - [ ] **Step 1: Write the failing test**
 ```python
@@ -987,6 +1066,10 @@ def test_falls_through_to_default():
     eng = PolicyEngine([], default_fn=lambda a,c: GovernanceVerdict(Decision.ALLOW,"DEFAULT","ok"))
     v = eng.evaluate(Action(tool="read_file", arguments={"path":"a"}), None)
     assert v.decision == Decision.ALLOW and v.rule_id == "DEFAULT"
+
+def test_decision_is_canonical_config_enum():
+    from aegiscode.config.schema import Decision as ConfigDecision
+    assert Decision is ConfigDecision            # single source of truth
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -997,10 +1080,10 @@ Expected: FAIL — module not found.
 - [ ] **Step 3: Write minimal implementation**
 ```python
 # aegiscode/governance/decision.py
-from enum import Enum
-class Decision(str, Enum):
-    ALLOW = "ALLOW"; ALLOW_WITH_AUDIT = "ALLOW_WITH_AUDIT"
-    REQUIRE_APPROVAL = "REQUIRE_APPROVAL"; DENY = "DENY"
+# Single source of truth is config.schema.Decision (created in Task 2); re-export here.
+from aegiscode.config.schema import Decision
+
+__all__ = ["Decision"]
 ```
 ```python
 # aegiscode/governance/engine.py
@@ -1300,7 +1383,7 @@ git commit -m "feat: command lexer + structure-safety layer (metastructure -> re
 
 **Interfaces:**
 - Consumes: `lex_command`, `Decision`.
-- Produces: `judge_command(command:str, allowlist:list[str], rules:list[dict]) -> GovernanceVerdict`. Order: lex (metastructure/lex-fail → DENY); argv[0] not in allowlist → DENY; then param rules (`{argv0, args_contain, decision}` first-match); else ALLOW. Built-in DENY set covers `rm -rf`, `sudo`, `su`, `chmod`, `chown`, `curl`, `wget`, `git push`, `git reset --hard`, `git clean`, `python -c`, `python -m`; REQUIRE_APPROVAL covers `pip install`, `git commit`.
+- Produces: `judge_command(command:str, allowlist:list[str], rules:list[dict]) -> GovernanceVerdict`. Order: lex (metastructure/lex-fail → DENY); argv[0] not in allowlist → DENY; then param rules (flat `{argv0:str, args_contain:list[str], decision}` first-match); else ALLOW. `rules` is a list of **plain dicts** matching the `CommandRule` schema (Task 2); the caller wires `[r.model_dump() for r in config.governance.command_rules]`. `argv0` is a scalar string (never a list) — consistent with SPEC §11 M11. The dangerous set `sudo/su/rm/chmod/chown/curl/wget` is **not** listed as explicit rules; they fall through to DENY because they are absent from `command_allowlist`. Explicit rules cover `git push/reset --hard/clean` (DENY), `git commit` (APPROVAL), `pip install` (APPROVAL), `python -c` / `python -m` (DENY).
 
 - [ ] **Step 1: Write the failing test**
 ```python
@@ -2720,7 +2803,7 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 | T7 action parser | T1 | T5, T8 |
 | T8 tool registry | T1 | T5, T7 |
 | T9 file tools | T8 | — |
-| T10 policy engine | T1 | — |
+| T10 policy engine | T1, T2 (re-exports config `Decision`) | — |
 | T11 path fence | T10 | T12 |
 | T12 dispatcher | T10, T11, T8 | — |
 | T13 command lexer | T1 | T11 |
@@ -2764,12 +2847,3 @@ M1 主循环→T22,T23 · M2 LLM→T5,T6 · M3 动作协议→T7 · M4 工具分
 ---
 
 *Plan complete. This document contains no executed code; implementation awaits execution-phase approval.*
-
-
-
-
-
-
-
-
-

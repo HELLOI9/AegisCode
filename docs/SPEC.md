@@ -197,8 +197,8 @@ AegisCode 要解决的问题:**让开发者敢把本地代码仓库交给一个 
 - **输入:** `aegis.yaml`。
 - **行为:** 代码内置默认 + YAML 覆盖 + 少数环境变量覆盖;加载时 Pydantic 校验;规则由配置驱动(改配置改变判定)。
 - **输出:** 校验通过的配置对象。
-- **边界:** command_rules 用 argv0 + args_contain(token 包含)匹配(正则→未来);`write_allowlist_dirs` 内写默认 ALLOW。
-- **错误:** 未知字段/类型错/缺失 → 启动即报错,不进主循环。
+- **边界:** `command_rules` 每条是**扁平结构** `{argv0: str, args_contain: [str], decision}`(argv0 为**单个字符串**,非列表;token 包含匹配;正则→未来);`write_allowlist_dirs` 内写默认 ALLOW。配置模型 **`extra="forbid"`**:未知字段直接报错;`decision` 与 `default_decisions.*` 的取值须是四档枚举之一,否则报错。
+- **错误:** 未知字段/类型错/枚举越界 → 启动即报错,不进主循环(`ConfigError`)。环境变量覆盖仅限 `AEGIS_LLM_PROVIDER`、`AEGIS_LLM_MODEL` 两项;`load_config(path, env=None)` 中 `env=None` 时读 `os.environ`。
 
 **`aegis.yaml` 结构(八段;数值项凡标注为示例者见 §17.5 未决问题):**
 ```yaml
@@ -219,15 +219,16 @@ feedback:
   target_tests: "tests/"
 governance:
   command_allowlist: [python, python3, pytest, ruff, mypy, git, ls, cat]   # 示例(UQ2)
-  command_rules:                 # 有序 first-match;argv0 + args_contain(token)
-    - {match: {argv0: git, args_contain: ["push"]}, decision: DENY}
-    - {match: {argv0: git, args_contain: ["reset", "--hard"]}, decision: DENY}
-    - {match: {argv0: git, args_contain: ["clean"]}, decision: DENY}
-    - {match: {argv0: git, args_contain: ["commit"]}, decision: REQUIRE_APPROVAL}
-    - {match: {argv0: pip, args_contain: ["install"]}, decision: REQUIRE_APPROVAL}
-    - {match: {argv0: python, args_contain: ["-c"]}, decision: DENY}
-    - {match: {argv0: python, args_contain: ["-m"]}, decision: DENY}
-    - {match: {argv0: [sudo, su, rm, chmod, chown, curl, wget]}, decision: DENY}
+  command_rules:                 # 有序 first-match;每条扁平 {argv0:str, args_contain:[str], decision}
+    - {argv0: git, args_contain: ["push"], decision: DENY}
+    - {argv0: git, args_contain: ["reset", "--hard"], decision: DENY}
+    - {argv0: git, args_contain: ["clean"], decision: DENY}
+    - {argv0: git, args_contain: ["commit"], decision: REQUIRE_APPROVAL}
+    - {argv0: pip, args_contain: ["install"], decision: REQUIRE_APPROVAL}
+    - {argv0: python, args_contain: ["-c"], decision: DENY}
+    - {argv0: python, args_contain: ["-m"], decision: DENY}
+    # 注:sudo/su/rm/chmod/chown/curl/wget 不在 command_allowlist,由默认档 command:DENY 兜底,
+    #     无需(也不能)用列表 argv0 逐条列——argv0 恒为标量字符串。
   sensitive_file_patterns: [".env", ".git/", "*.pem", "*.key", "*credentials*"]
   write_allowlist_dirs: ["src/", "tests/"]
   default_decisions: {readonly: ALLOW, write: REQUIRE_APPROVAL, command: DENY}

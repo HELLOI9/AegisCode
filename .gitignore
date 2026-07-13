@@ -1,0 +1,15 @@
+.claude/
+__pycache__/
+*.py[cod]
+.venv/
+.condaenv/
+*.sqlite
+*.sqlite-*
+.aegis/
+.env
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+venv/
+*.pem
+*.key

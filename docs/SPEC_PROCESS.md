@@ -530,3 +530,64 @@
 > **总体判断：** 对本项目而言，brainstorming 技能是**净正收益、且不可替代**——它逼我在写代码前把定位、边界、机制、演示、验收都想清楚，产出的 SPEC 密度远高于我独立写出的版本。但它**不是"甩给智能体就能自动产出好设计"的工具**：真正推动设计变清晰的，是几次我推翻它的推荐（绝对路径、Agent 写记忆、云部署鉴权），以及我坚持要求它把过程完整记入 SPEC_PROCESS.md。**Superpowers 提供的是纪律脚手架，判断力仍必须来自我本人**——这与课程"当 AI 能写大部分代码时，工程师的价值在哪"的命题恰好呼应：价值在于选题、划边界、识别哪些机制必须是代码而非提示词、以及不放过每一次含糊表述。
 
 ---
+
+# 冷启动验证（§4.5）：陌生智能体试运行与规约修订
+
+> 按通用要求 §4.5，用**一个与主开发智能体不同的全新 agent**（general-purpose 子智能体，隔离 git worktree），
+> 在**不提供任何对话历史/memory/SPEC_PROCESS** 的前提下，仅凭 `docs/SPEC.md` + `docs/PLAN.md`
+> 尝试实现 PLAN 的前 1–2 个 task，要求它"遇不确定即暂停并记录，不得猜测"。
+> 这是规约质量最关键的客观证据。
+
+## 一、验证设置
+
+- 执行者：全新 general-purpose 子智能体，运行于隔离 worktree（`agent-a584fb4aafef128c2`，暂保留）。
+- 输入：仅 `docs/SPEC.md` + `docs/PLAN.md`（允许读上游课程要求仅为理解评分口径，禁止据此填空）。
+- 任务：按 TDD 实现 Task 1（scaffold）与 Task 2（config schema + loader）。
+- 结果：两任务均实现并 commit（`7cc5ebd`、`97fef4a`），in-task 测试如 PLAN 预测般红→绿。但暴露出下列缺陷。
+
+## 二、暴露的缺陷（按严重度）
+
+**D-CS1【严重】`command_rules` 结构自相矛盾。** SPEC §11 M11 示例用嵌套 `{match:{argv0,args_contain},decision}` 且 `argv0` 有时是列表；PLAN Task 14 `judge_command` 却用扁平 `rule["argv0"]`/`rule["args_contain"]` 读取、`argv0` 为标量。后果:SPEC 自带的 `aegis.yaml` 喂给治理引擎会 KeyError/永不匹配；且 Task 2 把该字段定为无校验 `list[dict]`,错误拖到 Task 14 才爆。**根因:上一轮 SPEC 自查时我改过 YAML 却未与 Task 14 匹配器对照。**
+
+**D-CS2【严重】配置不拒绝未知字段。** SPEC M11 + US-7 要求"非法/未知字段→启动即报错",但 PLAN 用裸 `BaseModel`（无 `extra="forbid"`）,`bogus_field:123` 静默通过;`default_decisions.command` 也未对四档枚举校验（`NONSENSE_TIER` 可载入）。SPEC 承诺的验收标准实际不满足;且 Task 2 的 `test_invalid_field_raises` 只测类型错、未测未知字段。
+
+**D-CS3【中】PLAN 任务编号四处不一致。** File Structure、依赖图头部、Summary 表、任务正文对同一文件给不同编号（redactor/persistence 在头部 T3/T4、正文/表里反为 T4/T3;command_lexer/tool/approval 标注差 1–3）。**根因:我插入 T20/T21/T22 后改了正文编号,但先前写的 File Structure/依赖图未同步。**
+
+**D-CS4【中】幽灵文件 + 漏列文件。** File Structure 列 `fingerprint.py`(T17)但 fingerprint 实际在 T15 的 `approval.py`,无任务创建该文件;真实 T12 产物 `dispatcher.py` 反而漏列。
+
+**D-CS5【中】目录名错误。** File Structure 写 `action/`,Task 7 实际建 `protocol/`,下游 import 全用 `protocol`。
+
+**D-CS6【低】bootstrap 顺序。** 每任务 Step 2 都 `Run: pytest`,但 pytest 到 Step 4 才装;冷机器上首次失败是 `No module named pytest`,非 PLAN 预测的 `No module named 'aegiscode'`。
+
+**D-CS7【低】环境变量覆盖未定义。** SPEC 说"少数环境变量覆盖"未点名;PLAN 自创 `AEGIS_LLM_PROVIDER/MODEL`(SPEC 无),且 `load_config(env=None)` 是否读 `os.environ` 未定义。
+
+## 三、修订（含前后 diff 要点）
+
+用户指示"立刻修订"。修订如下（SPEC.md 与 PLAN.md 均已改）：
+
+**修 D-CS1** — 定案 `command_rules` 为**扁平结构 + argv0 标量字符串**（与 Task 14 工作代码一致）:
+- SPEC §11 M11 YAML:`{match:{argv0:git,args_contain:[push]},decision:DENY}` → `{argv0:git, args_contain:[push], decision:DENY}`;删除列表 argv0 的 `{match:{argv0:[sudo,...]}}` 一条,改为注释说明 sudo/rm 等不在允许列表、由默认档 `command:DENY` 兜底。
+- PLAN Task 2 `schema.py`:`command_rules: list[dict]` → `command_rules: list[CommandRule]`,新增 `class CommandRule(argv0:str, args_contain:list[str]=[], decision:Decision)`。
+- PLAN Task 14 Interfaces:显式声明 `rules` 是匹配 `CommandRule` 的扁平 dict,调用方传 `[r.model_dump() for r in config.governance.command_rules]`,argv0 恒标量。
+
+**修 D-CS2** — SPEC M11 边界/错误:新增"配置模型 `extra="forbid"`;decision 与 default_decisions.* 须四档枚举之一,否则报错"。PLAN Task 2:所有嵌套模型继承 `_Strict(model_config=ConfigDict(extra="forbid"))`;`Decision(str,Enum)` 定义在 config/schema.py(作单一真源);`DefaultDecisions` 三字段与 `CommandRule.decision` 均用 `Decision` 枚举;新增测试 `test_unknown_top_level_field_raises`/`test_unknown_nested_field_raises`/`test_bad_decision_tier_raises`/`test_command_rules_flat_shape`/`test_command_rules_reject_nested_match`/`test_env_overrides_provider_and_model`。
+
+**修 D-CS3** — PLAN File Structure 与依赖图头部编号全部对齐任务正文(redactor=T3、persistence=T4、command_lexer=T13、command_rules=T14、command_tool=T16、run_tests=T17、approval=T15);Milestone 2 描述"5 split tasks"→"6 split tasks";依赖图 Milestone 2/3/6 及并行组 {T11,T13} 同步;Summary 表 T10 依赖补 T2。
+
+**修 D-CS4** — File Structure 删 `fingerprint.py`、补 `dispatcher.py`(标 T12);新增说明"`fingerprint()` 位于 governance/approval.py(T15),无独立 fingerprint.py"。
+
+**修 D-CS5** — File Structure `action/` → `protocol/`(model.py/parser.py),与 Task 7 及下游 import 一致。
+
+**修 D-CS6** — PLAN 新增"Environment Bootstrap(Task 1 之前做一次)"章节(建 venv + pip install pytest);Task 1/Task 2 Step 2 加 Prereq 提示与"若见 No module named pytest 说明漏 bootstrap"。
+
+**修 D-CS7** — SPEC M11 错误:明确"环境变量覆盖仅限 `AEGIS_LLM_PROVIDER`、`AEGIS_LLM_MODEL`;`env=None` 时读 `os.environ`"。PLAN Task 2 loader:`_ENV_MAP` 显式两项,`src = os.environ if env is None else env`。
+
+**附带修复**:`Decision` 枚举原在 T2 与 T10 各定义一次(重复);现定为 config/schema.py 单一真源,T10 `governance/decision.py` 改为 `from aegiscode.config.schema import Decision` 再导出,并加断言 `Decision is ConfigDecision`。
+
+## 四、验证结论与我的处理
+
+- 子智能体严格遵守"不猜测、遇歧义即停",报告可直接作为规约质量的客观证据。
+- 暴露的 7 项缺陷中,D-CS1 与 D-CS3 是我在写/改 SPEC/PLAN 时**亲手引入**的(配置结构未跨文件对照、插入任务后未同步编号)——印证 §4.5"主 agent 与我共享隐性上下文会高估 spec 清晰度"的判断。
+- 全部 7 项已修订(D-CS1/2/3/4/5/6 完全消除,D-CS7 由未决改为明确定义)。验证用 worktree 暂保留,待后续统一删除。
+
+---
