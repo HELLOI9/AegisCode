@@ -15,3 +15,10 @@ def test_raises_when_exhausted():
     m = MockLLM([])
     with pytest.raises(MockExhaustedError):
         m.complete([])
+
+def test_received_messages_not_aliased():
+    m = MockLLM(["a"])
+    msgs = [{"role": "user", "content": "hi"}]
+    m.complete(msgs)
+    msgs.append({"role": "user", "content": "MUTATED"})   # caller mutates after the call
+    assert m.received_messages[0] == [{"role": "user", "content": "hi"}]  # recording unchanged

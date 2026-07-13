@@ -10,7 +10,7 @@ class MockLLM(LLMClient):
         self.received_messages: list[list[dict]] = []
 
     def complete(self, messages: list[dict]) -> str:
-        self.received_messages.append(messages)
+        self.received_messages.append(list(messages))
         if not self._queue:
             raise MockExhaustedError("no scripted responses left")
         return self._queue.pop(0)
