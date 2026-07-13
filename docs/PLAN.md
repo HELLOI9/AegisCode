@@ -221,7 +221,7 @@ git commit -m "chore: project scaffold + make test"
 
 ---
 
-### Task 2: Config schema + YAML loader
+### Task 2: Config schema + YAML loader ✅ DONE (387c632, fix 4cf0126)
 
 **Files:**
 - Create: `aegiscode/config/__init__.py`, `aegiscode/config/schema.py`, `aegiscode/config/loader.py`, `aegis.yaml`, `tests/config/test_loader.py`
