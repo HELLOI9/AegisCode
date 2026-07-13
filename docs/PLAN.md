@@ -100,11 +100,12 @@ Every task's Step 2 uses `pytest`, so `pytest` must exist before Step 2 can prod
 conda create -p ./.condaenv python=3.12 && conda activate ./.condaenv
 # Option B (uv):
 uv venv --python 3.12 .venv && source .venv/bin/activate
+# (uv ships without pip; use `uv pip install ...` instead of `python -m pip ...` below)
 # Option C (stdlib venv — requires the python3.12-venv system package;
 #   on Debian/Ubuntu run `sudo apt install python3.12-venv` first, else ensurepip fails):
 python3.12 -m venv .venv && source .venv/bin/activate
 
-python -m pip install --upgrade pip pytest
+python -m pip install --upgrade pip pytest    # under Option B use: uv pip install pytest
 ```
 
 After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the manual `pytest` install. If none of A/B/C is available, install pyenv/uv/conda first — the plan targets Python 3.12 only.
@@ -301,7 +302,7 @@ Expected: FAIL — module not found.
 ```python
 # aegiscode/config/schema.py
 from enum import Enum
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 class Decision(str, Enum):
     ALLOW = "ALLOW"
@@ -330,9 +331,23 @@ class CommandRule(_Strict):
     args_contain: list[str] = []
     decision: Decision
 
+# Canonical dangerous-command rules — baked into code defaults so governance is
+# secure-by-default even with NO aegis.yaml present (SPEC §A.4B: mechanism is code,
+# not config content). A YAML `command_rules:` list fully REPLACES this default
+# (declarative override), so if a user supplies rules they own the whole list.
+_DEFAULT_COMMAND_RULES: list["CommandRule"] = [
+    CommandRule(argv0="git",    args_contain=["push"],           decision=Decision.DENY),
+    CommandRule(argv0="git",    args_contain=["reset", "--hard"],decision=Decision.DENY),
+    CommandRule(argv0="git",    args_contain=["clean"],          decision=Decision.DENY),
+    CommandRule(argv0="git",    args_contain=["commit"],         decision=Decision.REQUIRE_APPROVAL),
+    CommandRule(argv0="pip",    args_contain=["install"],        decision=Decision.REQUIRE_APPROVAL),
+    CommandRule(argv0="python", args_contain=["-c"],             decision=Decision.DENY),
+    CommandRule(argv0="python", args_contain=["-m"],             decision=Decision.DENY),
+]
+
 class Governance(_Strict):
     command_allowlist: list[str] = ["python", "python3", "pip", "pytest", "ruff", "mypy", "git", "ls", "cat"]
-    command_rules: list[CommandRule] = []
+    command_rules: list[CommandRule] = Field(default_factory=lambda: list(_DEFAULT_COMMAND_RULES))  # baked-in; YAML fully overrides
     sensitive_file_patterns: list[str] = [".env", ".git/", "*.pem", "*.key", "*credentials*"]
     write_allowlist_dirs: list[str] = ["src/", "tests/"]
     default_decisions: DefaultDecisions = DefaultDecisions()
@@ -1426,17 +1441,24 @@ def test_pipe_denied():
     assert judge_command("cat x | sh", ALLOW, RULES).decision == Decision.DENY
 
 def test_shipped_config_allows_pip_to_reach_approval():
-    # Regression guard for the golden path: uses the REAL config defaults,
-    # not a hand-written mirror, so a missing `pip` in command_allowlist fails here.
+    # Regression guard for the golden path, driven by the REAL schema defaults
+    # (no hand-written mirror, no fallback). Because the dangerous-command rules are
+    # baked into Governance defaults, code-only (no YAML) must already yield the
+    # golden-path verdict. If someone empties the default rules or drops pip from the
+    # allowlist, THIS test goes red.
     from aegiscode.config.schema import Governance
-    g = Governance()
-    rules = [r.model_dump() for r in g.command_rules] or RULES
-    assert "pip" in g.command_allowlist                      # else pip denied at allowlist layer
+    g = Governance()                                          # code defaults only, no YAML
+    assert "pip" in g.command_allowlist                       # else pip denied at allowlist layer
+    assert len(g.command_rules) >= 5                          # rules are baked in, not empty
+    rules = [r.model_dump() for r in g.command_rules]         # NO `or RULES` fallback
     assert judge_command("pip install requests",
                          g.command_allowlist, rules).decision == Decision.REQUIRE_APPROVAL
+    # and a baked-in DENY still denies without any YAML:
+    assert judge_command("git push origin main",
+                         g.command_allowlist, rules).decision == Decision.DENY
 ```
 
-Note: `Governance()` ships with `command_rules == []` by default, so this test falls back to `RULES` for the rule set while still asserting against the real `command_allowlist`. If you later add default rules to the schema, drop the `or RULES` fallback.
+Note: the dangerous-command rules ship in the `Governance` schema defaults (Task 2), so governance is secure-by-default with no `aegis.yaml`. A YAML `command_rules:` list fully replaces the default (declarative override). This test must run with **no** YAML loaded.
 
 - [ ] **Step 2: Run test to verify it fails**
 

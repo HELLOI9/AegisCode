@@ -672,3 +672,60 @@
 本轮补漏修订与本记录一并提交。验证 worktree 按用户指示删除。
 
 ---
+
+# 第四次冷启动验证（§4.5）：push 后验最新版，挖出一个真实的 fail-open 安全缺陷
+
+> push 之前的第三轮因 worktree 基于过时 origin 而失效（教训5）。本轮先 `git push`（并把 origin 从 HTTPS
+> 切到 SSH 解决鉴权），使 origin/main 到 `1106964`，再派第四个全新子智能体——这才是对**最新文档**的有效验证。
+
+## 一、鉴权插曲（顺带记录）
+
+push 首次失败:`credential.helper` 未配置 → git 走 VS Code 的 `GIT_ASKPASS`,但 `VSCODE_GIT_IPC_HANDLE`
+指向一个已死 VS Code 实例的 socket(ECONNREFUSED)→ 退化匿名 → GitHub 拒绝匿名写。
+解法:本地已有 `~/.ssh/id_ed25519`,`ssh -T git@github.com` 认证为 HELLOI9 → 把 origin 从
+`https://…` 切到 `git@github.com:HELLOI9/AegisCode.git`,push 成功。
+
+## 二、本轮挖出的真实缺陷（前三轮全未发现）
+
+**D-CS15【严重·真实·安全 fail-open】治理规则只在 YAML 里、代码默认为空，导致零配置时 pip install 静默放行。**
+- `Governance.command_rules` schema 默认 = `[]`（空）。危险命令规则(pip install→审批、git push→DENY 等 7 条)
+  当时**只写在出厂 `aegis.yaml` 样例里**,没进代码默认。
+- 于是"代码默认路径(不加载 YAML)"下:`pip` 在允许列表内、无匹配规则 → 落到"允许列表内默认 ALLOW"
+  → `pip install` **静默放行,不进审批**。SPEC §4 黄金路径、US-3、差异化主句(§1)全部落空。
+- **更糟:这正是我第二轮为堵 D-CS8 而加的回归测试 `test_shipped_config_allows_pip_to_reach_approval`
+  自己制造的新掩盖**——它用 `rules = [...] or RULES`,schema 默认为空时回退到手写 RULES(含 pip 规则),
+  于是测试绿、缺陷藏。**一层补丁又埋了一层雷**,与 D-CS8/D-CS1 同源(未回到"零配置端到端"对照)。
+- 根因判断:决策 #22 定 `command_rules` 时把它当"配置内容",但决策 #12 的 fail-closed 只覆盖了
+  "命令不在允许列表→DENY",漏了"允许列表内、无规则→ALLOW"这个空档;规则若不在代码里,治理保证就依赖
+  "用户记得给完整 config",这违背 §A.4B(机制是代码)。
+
+## 三、修订（方向 A：把规则烤进代码默认，secure-by-default）
+
+用户拍板方向 A。改动:
+- **PLAN Task 2 schema**:新增 `_DEFAULT_COMMAND_RULES`(7 条 CommandRule),`Governance.command_rules`
+  默认改为 `Field(default_factory=lambda: list(_DEFAULT_COMMAND_RULES))`——**零配置即生效**;YAML 提供
+  `command_rules` 则全量替换(声明式覆盖)。
+- **PLAN Task 14 回归测试**:删掉自我失效的 `or RULES`,改为直接用 `Governance()` 代码默认断言
+  `pip install → REQUIRE_APPROVAL` 且 `git push → DENY`,并断言 `len(command_rules) >= 5`——
+  以后谁清空默认规则或删 pip,这个测试立刻红。
+- **SPEC §11 M11 边界**:明确"这 7 条 command_rules 是代码内置默认(secure-by-default),不加载任何
+  aegis.yaml 也已生效;YAML 全量覆盖;出厂 aegis.yaml 只是把代码默认显式写出"。
+- **附带修 F 项小缺陷**:bootstrap 中 `uv venv` 不自带 pip,`python -m pip install` 在 Option B 下会失败
+  → 注明改用 `uv pip install`。
+
+## 四、本轮其余检查结论（对最新版）
+
+A(command_rules 扁平/标量/YAML 可消费)、B(extra=forbid+枚举校验有测试)、C(Decision 单一真源)、
+D(File Structure/依赖图/任务体一致,T23 两处依赖一致,无幽灵文件)、E(make_service/make_api_client 已归属、
+schema.sql 在 map)、F(环境变量点名+env=None 读 os.environ)——**全部 PASS**。唯一 material 缺陷即 D-CS15,已修。
+
+## 五、教训
+
+- **教训 6(最重要)**:补丁必须"零配置/出厂默认"端到端验证,不能只测"给了正确 config"的路径;而且
+  **给回归测试加 fallback(`or RULES`)等于给自己造掩盖**——回归守卫必须打在最脆弱的真实默认路径上,不留后门。
+- 连续四轮验证的价值曲线:D-CS1~7(结构/元数据)→ D-CS8(出厂 config 语义)→ D-CS15(零配置 fail-open),
+  缺陷越挖越深、越接近"安全实质"。这印证 §4.5"陌生 agent 冷启动是单人项目最接近同侪评审的机制"。
+
+本轮修订与本记录一并提交。验证 worktree 按用户指示删除。
+
+---

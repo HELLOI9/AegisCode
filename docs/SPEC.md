@@ -197,7 +197,7 @@ AegisCode 要解决的问题:**让开发者敢把本地代码仓库交给一个 
 - **输入:** `aegis.yaml`。
 - **行为:** 代码内置默认 + YAML 覆盖 + 少数环境变量覆盖;加载时 Pydantic 校验;规则由配置驱动(改配置改变判定)。
 - **输出:** 校验通过的配置对象。
-- **边界:** `command_rules` 每条是**扁平结构** `{argv0: str, args_contain: [str], decision}`(argv0 为**单个字符串**,非列表;token 包含匹配;正则→未来);`write_allowlist_dirs` 内写默认 ALLOW。配置模型 **`extra="forbid"`**:未知字段直接报错;`decision` 与 `default_decisions.*` 的取值须是四档枚举之一,否则报错。
+- **边界:** `command_rules` 每条是**扁平结构** `{argv0: str, args_contain: [str], decision}`(argv0 为**单个字符串**,非列表;token 包含匹配;正则→未来);`write_allowlist_dirs` 内写默认 ALLOW。配置模型 **`extra="forbid"`**:未知字段直接报错;`decision` 与 `default_decisions.*` 的取值须是四档枚举之一,否则报错。**危险命令规则(下方 `command_rules` 那 7 条)是 harness 的代码内置默认(secure-by-default):即使不加载任何 `aegis.yaml`,治理规则也已生效**——这兑现 §A.4B"机制是代码而非配置内容",也堵住"省了 config 就静默放行 pip install"的 fail-open。YAML 里若提供 `command_rules`,则**全量替换**该默认(声明式覆盖);出厂 `aegis.yaml` 只是把这份代码默认显式写出以便查看/覆盖。
 - **错误:** 未知字段/类型错/枚举越界 → 启动即报错,不进主循环(`ConfigError`)。环境变量覆盖仅限 `AEGIS_LLM_PROVIDER`、`AEGIS_LLM_MODEL` 两项;`load_config(path, env=None)` 中 `env=None` 时读 `os.environ`。
 
 **`aegis.yaml` 结构(八段;数值项凡标注为示例者见 §17.5 未决问题):**
