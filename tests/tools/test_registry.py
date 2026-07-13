@@ -17,3 +17,14 @@ def test_unknown_returns_none():
 def test_toolresult_defaults():
     tr = ToolResult(tool="t", status="success", summary="s")
     assert tr.truncated is False and tr.category is None
+
+import pytest
+from pydantic import ValidationError
+
+def test_bad_status_rejected():
+    with pytest.raises(ValidationError):
+        ToolResult(tool="t", status="succes", summary="s")   # typo of "success"
+
+def test_bad_category_rejected():
+    with pytest.raises(ValidationError):
+        ToolResult(tool="t", status="failure", summary="s", category="NOT_A_CATEGORY")

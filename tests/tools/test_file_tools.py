@@ -38,3 +38,15 @@ def test_list_files_returns_entries(tmp_path):
 def test_read_missing_file_returns_tool_error(tmp_path):
     r = ReadFileTool().run({"path":"nope.py"}, _ctx(tmp_path))
     assert r.status == "error" and r.category == "TOOL_ERROR"
+
+def test_write_to_unwritable_path_returns_tool_error(tmp_path):
+    import os
+    ctx = _ctx(tmp_path)
+    # Point resolve at a path where a parent segment is a file, so makedirs fails.
+    (tmp_path / "afile").write_text("x")
+    r = WriteFileTool().run({"path": "afile/subdir/x.py", "content": "y"}, ctx)
+    assert r.status == "error" and r.category == "TOOL_ERROR"
+
+def test_list_missing_dir_returns_tool_error(tmp_path):
+    r = ListFilesTool().run({"path": "does_not_exist"}, _ctx(tmp_path))
+    assert r.status == "error" and r.category == "TOOL_ERROR"

@@ -17,9 +17,13 @@ class WriteFileTool:
                               summary="content exceeds write_max_bytes")
         abspath = ctx.resolve(path)
         ctx.snapshot(abspath)
-        os.makedirs(os.path.dirname(abspath) or ".", exist_ok=True)
-        with open(abspath, "w") as f:
-            f.write(content)
+        try:
+            os.makedirs(os.path.dirname(abspath) or ".", exist_ok=True)
+            with open(abspath, "w", encoding="utf-8") as f:
+                f.write(content)
+        except OSError as e:
+            return ToolResult(tool=self.name, status="error", category="TOOL_ERROR",
+                              summary=f"cannot write {path}: {e}")
         return ToolResult(tool=self.name, status="success",
                           summary=f"wrote {path}", artifacts={"changed_files": [path]})
 
@@ -46,7 +50,11 @@ class ListFilesTool:
 
     def run(self, arguments, ctx):
         root = ctx.resolve(arguments.get("path", "."))
-        names = sorted(os.listdir(root))
+        try:
+            names = sorted(os.listdir(root))
+        except OSError as e:
+            return ToolResult(tool=self.name, status="error", category="TOOL_ERROR",
+                              summary=f"cannot list {arguments.get('path', '.')}: {e}")
         return ToolResult(tool=self.name, status="success",
                           summary=f"{len(names)} entries", detail_for_llm="\n".join(names))
 
