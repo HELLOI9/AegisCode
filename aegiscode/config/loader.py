@@ -16,7 +16,8 @@ _ENV_MAP = {
 
 def load_config(path: str, env: dict | None = None) -> AegisConfig:
     try:
-        raw = yaml.safe_load(open(path, encoding="utf-8")) or {}
+        with open(path, encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
     except yaml.YAMLError as e:
         raise ConfigError(f"invalid YAML: {e}") from e
     src = os.environ if env is None else env

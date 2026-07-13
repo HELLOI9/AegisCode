@@ -62,3 +62,9 @@ def test_env_none_reads_os_environ(tmp_path, monkeypatch):
     monkeypatch.setenv("AEGIS_LLM_MODEL", "claude-from-os-env")
     cfg = load_config(str(tmp_path / "aegis.yaml"))   # env omitted → None → os.environ
     assert cfg.llm.model == "claude-from-os-env"
+
+def test_default_command_rules_pip_install_require_approval():
+    from aegiscode.config.schema import Governance, Decision
+    rules = Governance().command_rules
+    pip_rule = next(r for r in rules if r.argv0 == "pip" and "install" in r.args_contain)
+    assert pip_rule.decision == Decision.REQUIRE_APPROVAL
