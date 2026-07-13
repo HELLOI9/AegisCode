@@ -39,4 +39,12 @@
 - **产物**:aegiscode/persistence/{__init__,db.py,schema.sql} + tests/persistence/test_db.py。`open_db(path)`:isolation_level=None(autocommit,WAL 需在事务外)+ PRAGMA journal_mode=WAL + foreign_keys=ON + executescript(schema.sql,经 `Path(__file__).with_name` 定位)。6 表(tasks/steps/approval_requests/audit_events/memories/task_snapshots)含 SPEC §9 关键字段(hash 链 prev_hash/hash、memories.confirmed/source、approval.action_fingerprint 等),全部 IF NOT EXISTS(幂等)。
 - **两阶段评审**:spec ✅、quality Approved。3 Minor 全不阻塞:import 单行风格(继承计划)、foreign_keys=ON 但 schema 未声明 FK REFERENCES(计划 DDL 本就未含,记入最终评审考量)、测试风格。均未修(不擅自偏离计划 DDL)。
 - **人工干预**:无。
-- **里程碑**:Milestone 0(基础)4 个 task 全部完成。下一步:全分支最终评审 → finishing-a-development-branch(建 PR)。
+- **里程碑**:Milestone 0(基础)4 个 task 全部完成。
+
+### 全分支最终评审(Milestone 0)— READY TO MERGE
+- **评审 subagent**:opus(最强模型,按 skill 要求最终评审用最强档)。范围:merge-base 38dda6f..548a33b,10 commits。
+- **结论**:READY TO MERGE,无 Critical/Important。
+- **新发现 M-1(Minor,真实潜伏 bug)**:redactor 末行 `replace(workspace_root,"")` 未锚定路径边界,`/workspace-backup/...` 会被误删成 `-backup/...`。M0 中脱敏器尚未接线故休眠,且属"过度脱敏"非泄漏;但它是安全关键、被 4 个后续模块复用的工具,故当场修复(7d980ae):改用 `re.sub` 锚定到 `/`|行尾|`:` 边界,加 2 个回归测试(sibling 不被动、bare root 被删),老测试 test_rewrites_workspace_absolute_paths 仍过,22 passed。
+- **延后项(不阻塞合并)**:M-2 fastapi/uvicorn 作硬依赖(M13 落地时拆到 optional group);carried-3(aegis.yaml command_rules 全量替换=文档、FK pragma 无 FK=计划 DDL 如此、import/TOML 风格=装饰性)。
+- **人工干预**:M-1 修复由控制器决定"当场修而非延后"(安全关键工具 + 一行修 + 被多模块复用),派 sonnet 修复 subagent 一次到位。
+- **下一步**:finishing-a-development-branch(建 PR)。测试基线:22 passed,输出 pristine。
