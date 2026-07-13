@@ -858,7 +858,7 @@ git commit -m "feat: Action model + robust JSON parser (fence/last-object)"
 
 ---
 
-### Task 8: ToolResult model + tool registry & interface
+### Task 8: ToolResult model + tool registry & interface ✅ DONE (ccbd1de)
 
 **Files:**
 - Create: `aegiscode/tools/__init__.py`, `aegiscode/tools/result.py`, `aegiscode/tools/base.py`, `aegiscode/tools/registry.py`, `tests/tools/test_registry.py`

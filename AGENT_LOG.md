@@ -73,3 +73,9 @@
 - **两阶段评审**:**Needs fixes**——1 Important(真实 bug):初版 `_last_balanced` 是字符级括号计数,对"JSON 字符串值内含 `{`/`}`"(如 write_file 的 content 是代码)会误配、截断→对合法输入误报 ActionParseError。违反 SPEC §M3"稳健 JSON 提取"。判定为"计划示例代码的弱点,非规约选择",当场修。
 - **修复 f33e0c2**:改用 `json.JSONDecoder().raw_decode()` 逐 `{` 位置扫描(尊重 JSON 字符串转义),取最后一个成功解析的 dict;保持 parse_action/ActionParseError 公共名不变;补 2 个 braces-in-string 回归测试 + 异常链 from e。6 parser 测试全过(4 原 + 2 新),`make test` 35 passed。控制器直接验证(raw_decode 就位 + 6 测试过)代替再派评审。
 - **教训**:计划里"手写括号计数器"这类看似完整的示例代码可能不满足 spec 的"稳健"要求;评审用一个具体风险(字符串内括号)探到了它。这类"示例代码弱点"应按 spec 意图修复,而非因"计划这么写"就放行。
+
+### Task 8 · ToolResult + 工具注册表/接口 — ✅ 完成 (ccbd1de)
+- **TDD**:RED = 模块不存在;GREEN = 3 新测试,`make test` 38 passed。
+- **产物**:aegiscode/tools/{__init__,result.py,base.py,registry.py}。ToolResult(BaseModel,9 字段+默认);Tool(Protocol) name+run;ToolRegistry register/get(未知→None)/names。仅基座,无具体工具(符合 YAGNI)。
+- **两阶段评审**:spec ✅、quality Approved。2 Minor:ToolRegistry.get/register/names 缺类型注解(cosmetic,继承计划,mypy 可受益)。按 skill 将 Minor 记入账本交最终评审 triage,不即时修。
+- **人工干预**:无。
