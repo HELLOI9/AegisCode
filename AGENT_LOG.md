@@ -79,3 +79,10 @@
 - **产物**:aegiscode/tools/{__init__,result.py,base.py,registry.py}。ToolResult(BaseModel,9 字段+默认);Tool(Protocol) name+run;ToolRegistry register/get(未知→None)/names。仅基座,无具体工具(符合 YAGNI)。
 - **两阶段评审**:spec ✅、quality Approved。2 Minor:ToolRegistry.get/register/names 缺类型注解(cosmetic,继承计划,mypy 可受益)。按 skill 将 Minor 记入账本交最终评审 triage,不即时修。
 - **人工干预**:无。
+
+### Task 9 · 文件工具(list/read/search/write)— ✅ 完成 (b65fed1, fix 4e9a98f)
+- **TDD**:RED = 模块不存在;GREEN = 4 新测试,`make test` 42 passed。
+- **产物**:aegiscode/tools/file_tools.py。四工具纯 IO(路径经 ctx.resolve,治理留给后续 dispatcher):WriteFileTool 写前查 write_max_bytes(用 encode 字节长)+ctx.snapshot+changed_files artifact;ReadFileTool NUL 嗅探→binary skipped;SearchTextTool os.walk+跳二进制;ListFilesTool 排序 listdir。
+- **两阶段评审**:spec ✅、quality Approved。1 Important(2 处 open().read() 泄漏句柄,与 T2 同类 bug;WriteFileTool 已用 with)+2 Minor(ListFilesTool 零测试覆盖、ReadFileTool 坏路径抛裸异常违反 ToolResult 契约)。全部在 4e9a98f 修:两读改 with、ReadFileTool 坏路径返回 TOOL_ERROR 结构化结果、补 ListFilesTool+坏路径测试。44 passed。
+- **人工干预**:控制器决定合并修 Important+2 Minor(句柄泄漏是重复 bug 类;坏路径必须走 ToolResult 契约否则主循环会崩而非收到 TOOL_ERROR 反馈)。
+- **里程碑**:Milestone 1(决策与工具基座)5 个 task 全部完成。下一步:全分支最终评审(opus)→ PR。

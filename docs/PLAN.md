@@ -944,7 +944,7 @@ git commit -m "feat: ToolResult model + tool registry and interface"
 
 ---
 
-### Task 9: File tools (list/read/search/write) — pure IO, no governance
+### Task 9: File tools (list/read/search/write) — pure IO, no governance ✅ DONE (b65fed1, fix 4e9a98f)
 
 **Files:**
 - Create: `aegiscode/tools/file_tools.py`, `tests/tools/test_file_tools.py`
