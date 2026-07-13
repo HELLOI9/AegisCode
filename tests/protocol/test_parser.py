@@ -17,3 +17,12 @@ def test_missing_tool_raises():
 def test_malformed_json_raises():
     with pytest.raises(ActionParseError):
         parse_action('not json at all')
+
+def test_parses_object_with_braces_in_string_value():
+    a = parse_action('here {"tool":"write_file","arguments":{"content":"def f(): return {1,2}"}}')
+    assert a.tool == "write_file"
+    assert a.arguments["content"] == "def f(): return {1,2}"
+
+def test_picks_last_valid_object_with_braces_in_strings():
+    a = parse_action('{"tool":"a","arguments":{}} then {"tool":"b","arguments":{"x":"} weird {"}}')
+    assert a.tool == "b" and a.arguments["x"] == "} weird {"
