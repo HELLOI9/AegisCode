@@ -5,7 +5,8 @@ from typing import NamedTuple
 class LexResult(NamedTuple):
     ok: bool; argv: list; reason: str; has_metastructure: bool
 
-_META = ["|", ">", "<", ";", "&&", "||", "$(", "`", "&", "$(", "(", ")"]
+_META = ["&&", "||", "$(", ">>", "|", ">", "<", ";", "`", "&", "(", ")",
+         "*", "?", "[", "{", "\n", "\r"]
 
 def lex_command(command: str) -> LexResult:
     for token in _META:
