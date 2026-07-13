@@ -92,15 +92,21 @@ aegis.yaml             # sample config (T2)
 
 ## Environment Bootstrap (do this once, before Task 1)
 
-Every task's Step 2 uses `pytest`, so `pytest` must exist before Step 2 can produce the predicted "module not found: aegiscode" failure. On a cold machine:
+Every task's Step 2 uses `pytest`, so `pytest` must exist before Step 2 can produce the predicted "module not found: aegiscode" failure. On a cold machine, pick whichever isolation tool actually works on your box:
 
 ```bash
-python3.12 -m venv .venv           # or `conda create -p ./.condaenv python=3.12`
-source .venv/bin/activate
+# Option A (most portable — no system packages needed):
+conda create -p ./.condaenv python=3.12 && conda activate ./.condaenv
+# Option B (uv):
+uv venv --python 3.12 .venv && source .venv/bin/activate
+# Option C (stdlib venv — requires the python3.12-venv system package;
+#   on Debian/Ubuntu run `sudo apt install python3.12-venv` first, else ensurepip fails):
+python3.12 -m venv .venv && source .venv/bin/activate
+
 python -m pip install --upgrade pip pytest
 ```
 
-After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the manual `pytest` install. If your Python is not 3.12, install pyenv/uv/conda first — the plan does not target other versions.
+After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the manual `pytest` install. If none of A/B/C is available, install pyenv/uv/conda first — the plan targets Python 3.12 only.
 
 ## Dependency Graph & Parallelization
 
@@ -128,7 +134,7 @@ After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the
 
 **Milestone 4 — Core loop**
 - T22 termination (after T1).
-- T23 HarnessCore (after T5,T7,T8,T10,T18,T19,T22 + governance set) — the integration task.
+- T23 HarnessCore — the integration task; after **T5, T7, T8, T9, T12, T14, T15, T16, T17, T18, T19, T21, T22** (T10/T11/T13 enter transitively via T12/T14).
 
 **Milestone 5 — Credentials**
 - T24 credential store ∥ T25 secret scanner (both after T1).
@@ -324,7 +330,7 @@ class CommandRule(_Strict):
     decision: Decision
 
 class Governance(_Strict):
-    command_allowlist: list[str] = ["python", "python3", "pytest", "ruff", "mypy", "git", "ls", "cat"]
+    command_allowlist: list[str] = ["python", "python3", "pip", "pytest", "ruff", "mypy", "git", "ls", "cat"]
     command_rules: list[CommandRule] = []
     sensitive_file_patterns: list[str] = [".env", ".git/", "*.pem", "*.key", "*credentials*"]
     write_allowlist_dirs: list[str] = ["src/", "tests/"]
@@ -1417,7 +1423,19 @@ def test_not_in_allowlist_denied():
 
 def test_pipe_denied():
     assert judge_command("cat x | sh", ALLOW, RULES).decision == Decision.DENY
+
+def test_shipped_config_allows_pip_to_reach_approval():
+    # Regression guard for the golden path: uses the REAL config defaults,
+    # not a hand-written mirror, so a missing `pip` in command_allowlist fails here.
+    from aegiscode.config.schema import Governance
+    g = Governance()
+    rules = [r.model_dump() for r in g.command_rules] or RULES
+    assert "pip" in g.command_allowlist                      # else pip denied at allowlist layer
+    assert judge_command("pip install requests",
+                         g.command_allowlist, rules).decision == Decision.REQUIRE_APPROVAL
 ```
+
+Note: `Governance()` ships with `command_rules == []` by default, so this test falls back to `RULES` for the rule set while still asserting against the real `command_allowlist`. If you later add default rules to the schema, drop the `or RULES` fallback.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1465,7 +1483,7 @@ git commit -m "feat: command allowlist + dangerous-param rules (rm/sudo/pip/pyth
 
 **Interfaces:**
 - Consumes: `Action`.
-- Produces: `class ApprovalState(str,Enum)` PENDING/APPROVED/REJECTED/EXPIRED/SUPERSEDED; `fingerprint(action)->str` (sha256 of canonical tool+sorted args); `@dataclass ApprovalRequest(approval_id, task_id, step_index, action_snapshot:dict, action_fingerprint, rule_id, reason, risk_explanation, state)`; `class ApprovalStore` with `create(...)`, `decide(approval_id, approved:bool)`, `check_remembered(task_id, fp)->bool`, `remember(task_id, fp)`; and `validate_resume(req, current_action)` → raises `SupersededError` if fingerprint changed.
+- Produces: `class ApprovalState(str,Enum)` PENDING/APPROVED/REJECTED/EXPIRED/SUPERSEDED; `fingerprint(action)->str` (sha256 of canonical tool+sorted args); `@dataclass ApprovalRequest(approval_id, task_id, step_index, action_snapshot:dict, action_fingerprint, rule_id, reason, risk_explanation, state)`; `class ApprovalStore` with `create(...)`, `decide(approval_id, approved:bool)`, `check_remembered(task_id, fp)->bool`, `remember(task_id, fp)`; and `validate_resume(approved_fp: str, current_action)` → raises `SupersededError` if `fingerprint(current_action) != approved_fp`.
 
 - [ ] **Step 1: Write the failing test**
 ```python
@@ -2808,7 +2826,7 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 | T12 dispatcher | T10, T11, T8 | — |
 | T13 command lexer | T1 | T11 |
 | T14 command rules | T13 | — |
-| T15 approval SM | T10 | T17(fingerprint lives here) |
+| T15 approval SM (defines `fingerprint()`) | T10 | T16, T17 |
 | T16 command tool | T14, T8 | T17 |
 | T17 run_tests+finish | T8 | T16 |
 | T18 feedback | T3, T8 | T19, T20 |
@@ -2816,7 +2834,7 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 | T20 memory store | T4, T3, T25(scanner) | T18, T19 |
 | T21 context builder | T20 | — |
 | T22 termination | T1 | — |
-| T23 HarnessCore | T5,T7,T12,T14,T15,T16,T17,T18,T19,T21,T22 | — |
+| T23 HarnessCore | T5,T7,T8,T9,T12,T14,T15,T16,T17,T18,T19,T21,T22 | — |
 | T24 credential store | T1 | T25 |
 | T25 secret scanner | T1 | T24 |
 | T26 app service | T23, T4 | — |

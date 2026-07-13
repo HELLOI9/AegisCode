@@ -591,3 +591,50 @@
 - 全部 7 项已修订(D-CS1/2/3/4/5/6 完全消除,D-CS7 由未决改为明确定义)。验证用 worktree 暂保留,待后续统一删除。
 
 ---
+
+# 第二次冷启动验证（§4.5 复验）：修订后再验 + 新缺陷
+
+> 第一轮修订后，再派**另一个全新 general-purpose 子智能体**（新的隔离 worktree `agent-ab2a63ac4f8f13354`，暂保留），
+> 仍只给 `docs/SPEC.md` + `docs/PLAN.md`，实现 Task 1/2/7/10/13/14（走到治理修订重灾区），
+> 目的：①确认第一轮 7 项修订是否真的成立；②检查修订本身是否引入新矛盾。
+
+## 一、第一轮修订的复验结果
+
+- **B（extra=forbid + 枚举校验）PASS**：4 个负向测试全过。
+- **C（Decision 单一真源）PASS**：`Decision is ConfigDecision` 身份断言过；governance 经再导出引用，无重复定义。
+- **F（环境变量点名）PASS**：仅 `AEGIS_LLM_PROVIDER`/`AEGIS_LLM_MODEL`；`env=None → os.environ` 实测生效。
+- **A（command_rules 结构）结构 PASS、语义 FAIL**：扁平/标量/嵌套三处一致，示例能载入为 `CommandRule`；但见 D-CS8。
+- **D（编号/路径）文件层 PASS、元数据层 FAIL**：目录名一致、无幽灵/漏列文件，但依赖表有错（D-CS9/D-CS10）。
+- **E（bootstrap）预测失败可复现，但首选命令不可跑**（D-CS11）。
+
+## 二、第二轮新暴露的缺陷
+
+**D-CS8【严重·新】`command_allowlist` 漏 `pip`，黄金路径断裂。** SPEC 出厂 `command_allowlist`（§11 M11 line 221）= `[python,python3,pytest,ruff,mypy,git,ls,cat]`，**没有 pip**。但治理管线第 3 层（允许列表）在第 4 层（危险参数规则）之前执行，于是用出厂配置实测 `pip install requests → DENY(CMD_ALLOWLIST)`，而 SPEC 在黄金路径（§4 步3）、US-3、§6 M5、§10.3、§15 M5 **五处**都要求它 `REQUIRE_APPROVAL`。→ HITL 招牌演示（pip install 暂停等审批）根本走不到，直接被拒。**且 Task 14 单测用手写的、含 pip 的 `ALLOW` 镜像，掩盖了这个 bug。** 根因与上一轮 D-CS1 同源：**改配置结构后没有回到"黄金路径"端到端对照**。
+
+**D-CS9【中·新】Summary 表 `fingerprint` 位置错。** 表中 T15 行的并行列写 `T17(fingerprint lives here)`，与 File Structure、line 91 note、Milestone 图、Task 15 正文（fingerprint 在 approval.py/T15）全部矛盾。
+
+**D-CS10【中·新】T23 两处依赖列表不一致。** Milestone-4（line 131）与 Summary 表（T23 行）给的依赖集不同，且都不完整（前者漏 T21，后者漏 T8/T9）。
+
+**D-CS11【低·新】bootstrap 首选命令在无 `python3.12-venv` 系统包时失败。** PLAN 首列 `python3.12 -m venv .venv` 触发 `ensurepip is not available`（需 sudo apt 装包）；只有备选的 conda 路径能跑。每任务 Step 2 的预测失败本身可精确复现。
+
+**D-CS12【低·新】T15 `validate_resume` 接口描述与代码签名不符。** Interfaces 写 `(req, current_action)`，代码/测试用 `(approved_fp, current_action)`。
+
+## 三、修订（本轮）
+
+- **修 D-CS8**：SPEC §11 M11 与 PLAN Task 2 schema 默认 `command_allowlist` **加入 `pip`**；并给 Task 14 新增回归测试 `test_shipped_config_allows_pip_to_reach_approval`——用**真实 config 默认 allowlist**（非手写镜像）断言 `pip install → REQUIRE_APPROVAL`，堵死掩盖路径。
+- **修 D-CS9**：Summary 表 T15 行改为"defines `fingerprint()`",并行列改 `T16,T17`。
+- **修 D-CS10**：T23 两处依赖统一为 `T5,T7,T8,T9,T12,T14,T15,T16,T17,T18,T19,T21,T22`（T10/T11/T13 经 T12/T14 传递）。
+- **修 D-CS11**：bootstrap 章节重排为 A) conda B) uv C) stdlib venv(注明需 `python3.12-venv`)，把最可移植的放前面。
+- **修 D-CS12**：Interfaces 改为 `validate_resume(approved_fp: str, current_action)`。
+
+## 四、结论与"避免重蹈覆辙"的教训
+
+- 第一轮修订**确实成立**（B/C/F PASS）；本轮新缺陷主要是**上一轮修订的连带遗漏**（改 allowlist/结构时没回归黄金路径）与**元数据未同步**（表格）。
+- **教训 1（最重要）**：任何改动"治理配置结构/默认值"后，必须回到 §4 黄金路径与 §16.4 演示做一次端到端对照——单元测试用手写镜像会掩盖出厂配置的缺陷。已把该回归固化为 Task 14 的 `test_shipped_config_...`。
+- **教训 2**：涉及编号/依赖/路径的"地图类"元数据（File Structure、依赖图、Summary 表）任一处改动，必须三处同步核对。两轮都栽在这上面（D-CS3、D-CS9、D-CS10）。
+- **教训 3（流程）**：本轮我又出现"先改文档、漏记 SPEC_PROCESS"的问题，经用户追问才补记——说明"改完即记"这条纪律仍需我主动执行，不能等提醒。
+- **教训 4（工具）**：向已有长文档追加内容严禁用会覆盖全文件的写工具；本轮用"临时文件 + cat 追加"完成。
+
+本轮修订暂**未提交**，待用户指示统一提交。两个验证 worktree 暂保留待后续删除。
+
+---

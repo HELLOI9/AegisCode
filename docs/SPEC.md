@@ -218,7 +218,7 @@ feedback:
   test_command: "pytest -q"
   target_tests: "tests/"
 governance:
-  command_allowlist: [python, python3, pytest, ruff, mypy, git, ls, cat]   # 示例(UQ2)
+  command_allowlist: [python, python3, pip, pytest, ruff, mypy, git, ls, cat]   # 含 pip(否则 pip install 在允许列表层即被 DENY,走不到审批)
   command_rules:                 # 有序 first-match;每条扁平 {argv0:str, args_contain:[str], decision}
     - {argv0: git, args_contain: ["push"], decision: DENY}
     - {argv0: git, args_contain: ["reset", "--hard"], decision: DENY}
