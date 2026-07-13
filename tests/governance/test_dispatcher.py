@@ -58,3 +58,45 @@ def test_matcher_exception_returns_internal_error(tmp_path):
     assert result.category == "INTERNAL_ERROR"
     assert result.status == "error"
     assert len(executed) == 0, "tool must NOT execute when matcher raises"
+
+
+def test_deny_from_policy_does_not_execute(tmp_path):
+    executed = []
+
+    class SpyTool:
+        name = "read_file"
+        def run(self, arguments, ctx):
+            executed.append(1)
+            return ToolResult(tool="read_file", status="success", summary="ran")
+
+    reg = ToolRegistry(); reg.register(SpyTool())
+    rules = [PolicyRule("R-DENY", lambda a, c: True, Decision.DENY, "nope")]
+    eng = PolicyEngine(rules, default_fn=lambda a, c: GovernanceVerdict(Decision.ALLOW, "D", "d"))
+    d = Dispatcher(reg, eng, path_config=SimpleNamespace(
+        workspace_root=str(tmp_path), sensitive_patterns=[], readonly_tools={"read_file", "list_files", "search_text"}))
+    verdict, result = d.dispatch(
+        Action(tool="read_file", arguments={}),
+        SimpleNamespace(resolve=lambda p: str(tmp_path) + "/" + p))
+    assert verdict.decision == Decision.DENY and result.category == "POLICY_DENIED"
+    assert executed == []  # tool must NOT execute on DENY
+
+
+def test_require_approval_does_not_execute(tmp_path):
+    executed = []
+
+    class SpyTool:
+        name = "read_file"
+        def run(self, arguments, ctx):
+            executed.append(1)
+            return ToolResult(tool="read_file", status="success", summary="ran")
+
+    reg = ToolRegistry(); reg.register(SpyTool())
+    rules = [PolicyRule("R-APP", lambda a, c: True, Decision.REQUIRE_APPROVAL, "ask")]
+    eng = PolicyEngine(rules, default_fn=lambda a, c: GovernanceVerdict(Decision.ALLOW, "D", "d"))
+    d = Dispatcher(reg, eng, path_config=SimpleNamespace(
+        workspace_root=str(tmp_path), sensitive_patterns=[], readonly_tools={"read_file", "list_files", "search_text"}))
+    verdict, result = d.dispatch(
+        Action(tool="read_file", arguments={}),
+        SimpleNamespace(resolve=lambda p: str(tmp_path) + "/" + p))
+    assert verdict.decision == Decision.REQUIRE_APPROVAL and result is None
+    assert executed == []  # tool must NOT execute when approval required
