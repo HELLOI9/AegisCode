@@ -28,7 +28,12 @@ class ReadFileTool:
     name = "read_file"
 
     def run(self, arguments, ctx):
-        raw = open(ctx.resolve(arguments["path"]), "rb").read()
+        try:
+            with open(ctx.resolve(arguments["path"]), "rb") as fh:
+                raw = fh.read()
+        except OSError as e:
+            return ToolResult(tool=self.name, status="error", category="TOOL_ERROR",
+                              summary=f"cannot read {arguments['path']}: {e}")
         if _is_binary(raw):
             return ToolResult(tool=self.name, status="success", summary="binary skipped")
         text = raw.decode(errors="replace")
@@ -56,7 +61,8 @@ class SearchTextTool:
             for fn in fs:
                 fp = os.path.join(dp, fn)
                 try:
-                    data = open(fp, "rb").read()
+                    with open(fp, "rb") as fh:
+                        data = fh.read()
                 except OSError:
                     continue
                 if _is_binary(data):

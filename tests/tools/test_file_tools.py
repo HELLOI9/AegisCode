@@ -1,6 +1,6 @@
 # tests/tools/test_file_tools.py
 from types import SimpleNamespace
-from aegiscode.tools.file_tools import ReadFileTool, WriteFileTool, SearchTextTool
+from aegiscode.tools.file_tools import ReadFileTool, WriteFileTool, SearchTextTool, ListFilesTool
 
 def _ctx(tmp_path):
     return SimpleNamespace(resolve=lambda p: str(tmp_path / p),
@@ -27,3 +27,14 @@ def test_search_finds_match(tmp_path):
     WriteFileTool().run({"path":"a.py","content":"needle here\n"}, ctx)
     r = SearchTextTool().run({"query":"needle"}, ctx)
     assert "a.py" in r.detail_for_llm
+
+def test_list_files_returns_entries(tmp_path):
+    ctx = _ctx(tmp_path)
+    WriteFileTool().run({"path":"a.py","content":"x"}, ctx)
+    WriteFileTool().run({"path":"b.py","content":"y"}, ctx)
+    r = ListFilesTool().run({"path":"."}, ctx)
+    assert r.status == "success" and "a.py" in r.detail_for_llm and "b.py" in r.detail_for_llm
+
+def test_read_missing_file_returns_tool_error(tmp_path):
+    r = ReadFileTool().run({"path":"nope.py"}, _ctx(tmp_path))
+    assert r.status == "error" and r.category == "TOOL_ERROR"
