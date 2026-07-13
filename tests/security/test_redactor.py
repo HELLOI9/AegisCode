@@ -18,3 +18,12 @@ def test_rewrites_workspace_absolute_paths():
 
 def test_no_change_when_clean():
     assert redact("hello world") == "hello world"
+
+def test_redacts_generic_keyvalue_secret():
+    # value matches no sk-/AKIA family, so only the KEY=/TOKEN= generic pattern can catch it
+    out = redact("TOKEN=abcdefghijklmnop1234567890")
+    assert "abcdefghijklmnop1234567890" not in out
+
+def test_generic_pattern_case_insensitive():
+    out = redact("password = ZYXWVUTSRQ0987654321")
+    assert "ZYXWVUTSRQ0987654321" not in out
