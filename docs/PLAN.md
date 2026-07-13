@@ -670,7 +670,7 @@ git commit -m "feat: LLMClient interface + MockLLM with message recording"
 
 ---
 
-### Task 6: OpenAI + Anthropic adapters
+### Task 6: OpenAI + Anthropic adapters ✅ DONE (a7355d8, fix 034f39e)
 
 **Files:**
 - Create: `aegiscode/llm/openai_adapter.py`, `aegiscode/llm/anthropic_adapter.py`, `tests/llm/test_adapters.py`
