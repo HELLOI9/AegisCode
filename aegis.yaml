@@ -1,0 +1,90 @@
+# AegisCode configuration — SPEC §11 M11
+# All fields are optional; built-in defaults are secure-by-default.
+# Unknown fields are REJECTED (extra="forbid" on every model).
+
+workspace:
+  root: /workspace
+
+limits:
+  max_steps: 25
+  max_consecutive_failures: 5
+  no_progress_repeat_limit: 3
+  action_retry_limit: 3
+  command_timeout_sec: 30
+  output_max_bytes: 65536
+
+tools:
+  enabled:
+    - list_files
+    - read_file
+    - search_text
+    - write_file
+    - run_tests
+    - run_command
+    - finish
+  write_max_bytes: 1048576
+
+feedback:
+  test_command: "pytest -q"
+  target_tests: "tests/"
+
+governance:
+  command_allowlist:
+    - python
+    - python3
+    - pip
+    - pytest
+    - ruff
+    - mypy
+    - git
+    - ls
+    - cat
+  # Flat command_rules — each rule has argv0 (scalar string), args_contain, decision.
+  # This list REPLACES the baked-in defaults when present.
+  command_rules:
+    - argv0: git
+      args_contain: [push]
+      decision: DENY
+    - argv0: git
+      args_contain: [reset, --hard]
+      decision: DENY
+    - argv0: git
+      args_contain: [clean]
+      decision: DENY
+    - argv0: git
+      args_contain: [commit]
+      decision: REQUIRE_APPROVAL
+    - argv0: pip
+      args_contain: [install]
+      decision: REQUIRE_APPROVAL
+    - argv0: python
+      args_contain: [-c]
+      decision: DENY
+    - argv0: python
+      args_contain: [-m]
+      decision: DENY
+  sensitive_file_patterns:
+    - .env
+    - .git/
+    - "*.pem"
+    - "*.key"
+    - "*credentials*"
+  write_allowlist_dirs:
+    - src/
+    - tests/
+  default_decisions:
+    readonly: ALLOW
+    write: REQUIRE_APPROVAL
+    command: DENY
+
+memory:
+  retrieval_top_k: 8
+  context_budget_chars: 24000
+
+credentials:
+  allow_dotenv: false
+
+llm:
+  provider: openai
+  model: gpt-4o
+  # base_url: null  # override for local/proxy endpoints
