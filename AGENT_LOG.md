@@ -32,3 +32,11 @@
 - **两阶段评审**:spec ✅、quality Approved。2 Minor:①AWS `AKIA[0-9A-Z]{16}` 用精确 16(真实 key 恒 20 字符,正确,不改);②通用 KEY=/TOKEN= 族无独立测试(anthropic 测试里 sk-ant- 先命中、该族零直接覆盖)。②在 f214e4c 补 2 个隔离测试修复(18 passed)。
 - **人工干预**:无代码代写;补测试 subagent 一次到位。
 - **教训**:评审发现"某正则族被前序族遮蔽、零直接覆盖"的测试盲区——对安全关键、被多模块复用的工具,隔离测试值得补。
+
+### Task 4 · SQLite 持久层 — ✅ 完成 (158a744)
+- **技能**:subagent-driven-development;实现/评审均 sonnet。
+- **TDD**:RED = 模块不存在;GREEN = 2 新测试(6 表齐全 + journal_mode=wal),`make test` 20 passed。
+- **产物**:aegiscode/persistence/{__init__,db.py,schema.sql} + tests/persistence/test_db.py。`open_db(path)`:isolation_level=None(autocommit,WAL 需在事务外)+ PRAGMA journal_mode=WAL + foreign_keys=ON + executescript(schema.sql,经 `Path(__file__).with_name` 定位)。6 表(tasks/steps/approval_requests/audit_events/memories/task_snapshots)含 SPEC §9 关键字段(hash 链 prev_hash/hash、memories.confirmed/source、approval.action_fingerprint 等),全部 IF NOT EXISTS(幂等)。
+- **两阶段评审**:spec ✅、quality Approved。3 Minor 全不阻塞:import 单行风格(继承计划)、foreign_keys=ON 但 schema 未声明 FK REFERENCES(计划 DDL 本就未含,记入最终评审考量)、测试风格。均未修(不擅自偏离计划 DDL)。
+- **人工干预**:无。
+- **里程碑**:Milestone 0(基础)4 个 task 全部完成。下一步:全分支最终评审 → finishing-a-development-branch(建 PR)。

@@ -507,7 +507,7 @@ git commit -m "feat: deterministic redactor for keys and workspace paths"
 
 ---
 
-### Task 4: Persistence layer — SQLite schema + connection
+### Task 4: Persistence layer — SQLite schema + connection ✅ DONE (158a744)
 
 **Files:**
 - Create: `aegiscode/persistence/__init__.py`, `aegiscode/persistence/db.py`, `aegiscode/persistence/schema.sql`, `tests/persistence/test_db.py`
