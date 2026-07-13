@@ -763,7 +763,7 @@ git commit -m "feat: OpenAI + Anthropic adapters with injectable transport"
 
 ---
 
-### Task 7: Action model + robust parser
+### Task 7: Action model + robust parser ✅ DONE (3362c6d, fix f33e0c2)
 
 **Files:**
 - Create: `aegiscode/protocol/__init__.py`, `aegiscode/protocol/action.py`, `aegiscode/protocol/parser.py`, `tests/protocol/test_parser.py`
