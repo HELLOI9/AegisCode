@@ -27,3 +27,11 @@ def test_redacts_generic_keyvalue_secret():
 def test_generic_pattern_case_insensitive():
     out = redact("password = ZYXWVUTSRQ0987654321")
     assert "ZYXWVUTSRQ0987654321" not in out
+
+def test_workspace_sibling_prefix_not_mangled():
+    out = redact("/workspace-backup/src/foo.py", workspace_root="/workspace")
+    assert out == "/workspace-backup/src/foo.py"   # sibling dir must be untouched
+
+def test_workspace_bare_root_stripped():
+    out = redact("at /workspace done", workspace_root="/workspace")
+    assert "/workspace" not in out

@@ -13,6 +13,9 @@ def redact(text: str, workspace_root: str | None = None) -> str:
     for p in _PATTERNS:
         out = p.sub("[REDACTED]", out)
     if workspace_root:
-        out = out.replace(workspace_root.rstrip("/") + "/", "")
-        out = out.replace(workspace_root, "")
+        root = workspace_root.rstrip("/")
+        # strip "<root>/" -> "" so in-workspace paths become relative
+        out = re.sub(re.escape(root) + r"/", "", out)
+        # strip bare "<root>" only at a path boundary (/, end, whitespace, colon)
+        out = re.sub(re.escape(root) + r"(?=/|$|[\s:])", "", out)
     return out
