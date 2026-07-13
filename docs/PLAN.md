@@ -595,7 +595,7 @@ git commit -m "feat: SQLite persistence with 6-table schema + WAL"
 
 ## Milestone 1 — LLM abstraction, action protocol, tools
 
-### Task 5: LLMClient interface + MockLLM
+### Task 5: LLMClient interface + MockLLM ✅ DONE (597a8ac, fix 014cb16)
 
 **Files:**
 - Create: `aegiscode/llm/__init__.py`, `aegiscode/llm/base.py`, `aegiscode/llm/mock.py`, `tests/llm/test_mock.py`

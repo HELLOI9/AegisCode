@@ -48,3 +48,15 @@
 - **延后项(不阻塞合并)**:M-2 fastapi/uvicorn 作硬依赖(M13 落地时拆到 optional group);carried-3(aegis.yaml command_rules 全量替换=文档、FK pragma 无 FK=计划 DDL 如此、import/TOML 风格=装饰性)。
 - **人工干预**:M-1 修复由控制器决定"当场修而非延后"(安全关键工具 + 一行修 + 被多模块复用),派 sonnet 修复 subagent 一次到位。
 - **下一步**:finishing-a-development-branch(建 PR)。测试基线:22 passed,输出 pristine。
+
+---
+
+## 2026-07-14 · Milestone 1 启动(新 worktree)
+**Worktree**:`.claude/worktrees/m1-decision-tools`,分支 `worktree-m1-decision-tools`(base = main @ fac0127,M0 经 PR#1 merge 已并入)。基线 `make test` = 22 passed。
+**模块**:T5 LLM base+Mock、T6 适配器、T7 动作协议、T8 工具注册、T9 文件工具。依赖仅 T1/T2(已在 main)。实现/评审 sonnet,最终评审 opus。
+
+### Task 5 · LLMClient 接口 + MockLLM — ✅ 完成 (597a8ac, fix 014cb16)
+- **TDD**:RED = 模块不存在;GREEN = 3 新测试,`make test` 25 passed。
+- **产物**:aegiscode/llm/{__init__,base.py,mock.py}。`LLMClient(ABC).complete(messages)->str`;`MockLLM(scripted_responses)` 按序返回 + `received_messages` 记录每轮 messages + `MockExhaustedError`。零网络零 key——离线确定性测试基座(§A.4C/§16.2)。
+- **两阶段评审**:spec ✅、quality Approved。1 Minor:received_messages 存 caller 列表引用(aliasing),caller 跨轮改 messages 会污染记录。因 MockLLM 是后续"失败反馈进入下一轮"断言(demo②)基础工具,当场修(014cb16):存 `list(messages)` 浅拷贝 + 回归测试。26 passed。
+- **人工干预**:控制器决定修此 Minor(基座工具、一行修、防后续断言被静默污染)。
