@@ -156,7 +156,7 @@ After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the
 
 # Milestone 0 — Foundations
 
-### Task 1: Project scaffold + Makefile + package skeleton
+### Task 1: Project scaffold + Makefile + package skeleton ✅ DONE (c6f8f28)
 
 **Files:**
 - Create: `pyproject.toml`, `aegiscode/__init__.py`, `Makefile`, `tests/__init__.py`, `tests/test_smoke.py`
