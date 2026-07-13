@@ -156,7 +156,7 @@ After Task 1's `pyproject.toml` exists, `pip install -e ".[dev]"` supersedes the
 
 # Milestone 0 — Foundations
 
-### Task 1: Project scaffold + Makefile + package skeleton
+### Task 1: Project scaffold + Makefile + package skeleton ✅ DONE (c6f8f28)
 
 **Files:**
 - Create: `pyproject.toml`, `aegiscode/__init__.py`, `Makefile`, `tests/__init__.py`, `tests/test_smoke.py`
@@ -221,7 +221,7 @@ git commit -m "chore: project scaffold + make test"
 
 ---
 
-### Task 2: Config schema + YAML loader
+### Task 2: Config schema + YAML loader ✅ DONE (387c632, fix 4cf0126)
 
 **Files:**
 - Create: `aegiscode/config/__init__.py`, `aegiscode/config/schema.py`, `aegiscode/config/loader.py`, `aegis.yaml`, `tests/config/test_loader.py`
@@ -434,7 +434,7 @@ git commit -m "feat: config schema + YAML loader with validation"
 
 ---
 
-### Task 3: Redactor (deterministic secret/path scrubber)
+### Task 3: Redactor (deterministic secret/path scrubber) ✅ DONE (aa8111d, +f214e4c)
 
 **Files:**
 - Create: `aegiscode/security/__init__.py`, `aegiscode/security/redactor.py`, `tests/security/test_redactor.py`
@@ -507,7 +507,7 @@ git commit -m "feat: deterministic redactor for keys and workspace paths"
 
 ---
 
-### Task 4: Persistence layer — SQLite schema + connection
+### Task 4: Persistence layer — SQLite schema + connection ✅ DONE (158a744)
 
 **Files:**
 - Create: `aegiscode/persistence/__init__.py`, `aegiscode/persistence/db.py`, `aegiscode/persistence/schema.sql`, `tests/persistence/test_db.py`
