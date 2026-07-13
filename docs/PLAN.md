@@ -1067,7 +1067,7 @@ git commit -m "feat: file tools (list/read/search/write) with binary skip + size
 
 > Governance is deliberately decomposed into separate files/tasks: decision types + engine (T10), path fence (T11), dispatch integration (T12), command lexer (T13), command rules (T14), approval state machine (T15). **There is no single `guardrail.py`.**
 
-### Task 10: Decision types + ordered PolicyEngine (first-match-wins)
+### Task 10: Decision types + ordered PolicyEngine (first-match-wins) ✅ DONE (5a6739d, +3c402ea)
 
 **Files:**
 - Create: `aegiscode/governance/__init__.py`, `aegiscode/governance/decision.py`, `aegiscode/governance/engine.py`, `tests/governance/test_engine.py`

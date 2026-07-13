@@ -97,3 +97,15 @@
 - **多轮记录/status 分类等覆盖建议**:opus 建议后续加 MockLLM 多轮 received_messages[2] 断言(demo② 依赖)——记入 M4 主循环时补。
 - **人工干预**:控制器决定合并修 Important+2 Minor(错误契约是主循环安全网的关键一致性;Literal 让控制流 seam 防拼写错)。
 - **下一步**:PR + merge;之后 Milestone 2(治理,main contribution)。
+
+---
+
+## 2026-07-14 · Milestone 2 启动(治理 — main contribution)
+**Worktree**:`.claude/worktrees/m2-governance`,分支 `worktree-m2-governance`(base = main @ 43576ff,M0+M1 已并入)。基线 `make test` = 48 passed。
+**模块**:T10 决策+引擎、T11 路径围栏(乙)、T12 受治理分发器、T13 命令词法(甲 1-2层)、T14 命令规则(甲 3-4层)、T15 审批状态机、T16 命令执行工具、T17 run_tests+finish。全部依赖已在 main。
+
+### Task 10 · Decision + 有序 PolicyEngine — ✅ 完成 (5a6739d, +3c402ea)
+- **TDD**:RED = 模块不存在;GREEN = 3 新测试,`make test` 51 passed。
+- **产物**:aegiscode/governance/{__init__,decision.py,engine.py}。decision.py 纯 re-export config.schema.Decision(单一真源,test 断言 `Decision is ConfigDecision` 身份成立);GovernanceVerdict/PolicyRule dataclass;PolicyEngine.evaluate 有序 first-match-wins,无命中走 default_fn;每判定带 rule_id+reason。无具体规则(留给 T11/T13/T14)。
+- **两阶段评审**:spec ✅、quality Approved。2 Minor:①matcher 异常未捕获(引擎骨架,交 T12 dispatcher 作 try/except 边界)②单规则 ordering 测试不足以证 first-match-wins。②加 2 规则 ordering 测试 3c402ea(52 passed);①carried 到 T12。
+- **人工干预**:控制器决定补 ordering 测试(证治理核心不变量),matcher 异常 carry 到 dispatcher。
