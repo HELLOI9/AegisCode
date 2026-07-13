@@ -1235,7 +1235,7 @@ git commit -m "feat: path fence with realpath ownership + symlink-escape denial"
 
 ---
 
-### Task 12: Governed dispatcher — wire path fence + default tiers into tool dispatch
+### Task 12: Governed dispatcher — wire path fence + default tiers into tool dispatch ✅ DONE (c62f0e0, +e752c54)
 
 **Files:**
 - Create: `aegiscode/governance/dispatcher.py`, `tests/governance/test_dispatcher.py`
