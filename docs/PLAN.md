@@ -595,7 +595,7 @@ git commit -m "feat: SQLite persistence with 6-table schema + WAL"
 
 ## Milestone 1 — LLM abstraction, action protocol, tools
 
-### Task 5: LLMClient interface + MockLLM
+### Task 5: LLMClient interface + MockLLM ✅ DONE (597a8ac, fix 014cb16)
 
 **Files:**
 - Create: `aegiscode/llm/__init__.py`, `aegiscode/llm/base.py`, `aegiscode/llm/mock.py`, `tests/llm/test_mock.py`
@@ -670,7 +670,7 @@ git commit -m "feat: LLMClient interface + MockLLM with message recording"
 
 ---
 
-### Task 6: OpenAI + Anthropic adapters
+### Task 6: OpenAI + Anthropic adapters ✅ DONE (a7355d8, fix 034f39e)
 
 **Files:**
 - Create: `aegiscode/llm/openai_adapter.py`, `aegiscode/llm/anthropic_adapter.py`, `tests/llm/test_adapters.py`
@@ -763,7 +763,7 @@ git commit -m "feat: OpenAI + Anthropic adapters with injectable transport"
 
 ---
 
-### Task 7: Action model + robust parser
+### Task 7: Action model + robust parser ✅ DONE (3362c6d, fix f33e0c2)
 
 **Files:**
 - Create: `aegiscode/protocol/__init__.py`, `aegiscode/protocol/action.py`, `aegiscode/protocol/parser.py`, `tests/protocol/test_parser.py`
@@ -858,7 +858,7 @@ git commit -m "feat: Action model + robust JSON parser (fence/last-object)"
 
 ---
 
-### Task 8: ToolResult model + tool registry & interface
+### Task 8: ToolResult model + tool registry & interface ✅ DONE (ccbd1de)
 
 **Files:**
 - Create: `aegiscode/tools/__init__.py`, `aegiscode/tools/result.py`, `aegiscode/tools/base.py`, `aegiscode/tools/registry.py`, `tests/tools/test_registry.py`
@@ -944,7 +944,7 @@ git commit -m "feat: ToolResult model + tool registry and interface"
 
 ---
 
-### Task 9: File tools (list/read/search/write) — pure IO, no governance
+### Task 9: File tools (list/read/search/write) — pure IO, no governance ✅ DONE (b65fed1, fix 4e9a98f)
 
 **Files:**
 - Create: `aegiscode/tools/file_tools.py`, `tests/tools/test_file_tools.py`

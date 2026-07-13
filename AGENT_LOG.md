@@ -48,3 +48,52 @@
 - **延后项(不阻塞合并)**:M-2 fastapi/uvicorn 作硬依赖(M13 落地时拆到 optional group);carried-3(aegis.yaml command_rules 全量替换=文档、FK pragma 无 FK=计划 DDL 如此、import/TOML 风格=装饰性)。
 - **人工干预**:M-1 修复由控制器决定"当场修而非延后"(安全关键工具 + 一行修 + 被多模块复用),派 sonnet 修复 subagent 一次到位。
 - **下一步**:finishing-a-development-branch(建 PR)。测试基线:22 passed,输出 pristine。
+
+---
+
+## 2026-07-14 · Milestone 1 启动(新 worktree)
+**Worktree**:`.claude/worktrees/m1-decision-tools`,分支 `worktree-m1-decision-tools`(base = main @ fac0127,M0 经 PR#1 merge 已并入)。基线 `make test` = 22 passed。
+**模块**:T5 LLM base+Mock、T6 适配器、T7 动作协议、T8 工具注册、T9 文件工具。依赖仅 T1/T2(已在 main)。实现/评审 sonnet,最终评审 opus。
+
+### Task 5 · LLMClient 接口 + MockLLM — ✅ 完成 (597a8ac, fix 014cb16)
+- **TDD**:RED = 模块不存在;GREEN = 3 新测试,`make test` 25 passed。
+- **产物**:aegiscode/llm/{__init__,base.py,mock.py}。`LLMClient(ABC).complete(messages)->str`;`MockLLM(scripted_responses)` 按序返回 + `received_messages` 记录每轮 messages + `MockExhaustedError`。零网络零 key——离线确定性测试基座(§A.4C/§16.2)。
+- **两阶段评审**:spec ✅、quality Approved。1 Minor:received_messages 存 caller 列表引用(aliasing),caller 跨轮改 messages 会污染记录。因 MockLLM 是后续"失败反馈进入下一轮"断言(demo②)基础工具,当场修(014cb16):存 `list(messages)` 浅拷贝 + 回归测试。26 passed。
+- **人工干预**:控制器决定修此 Minor(基座工具、一行修、防后续断言被静默污染)。
+
+### Task 6 · OpenAI + Anthropic 适配器 — ✅ 完成 (a7355d8, fix 034f39e)
+- **TDD**:RED = 模块不存在;GREEN = 2 新测试(注入 fake http_post,零网络),`make test` 28 passed。
+- **产物**:aegiscode/llm/{openai_adapter,anthropic_adapter}.py。均 LLMClient 子类,可注入 http_post(默认 _real_post 用 urllib)。OpenAIAdapter 取 choices[0].message.content、base_url 可配;AnthropicAdapter 把 system 角色抽出到顶层 system 字段、body 仅留非 system 消息、取 content[].text。测试断言 system 拆分契约,不触网。
+- **两阶段评审**:spec ✅、quality Approved。4 Minor:①函数内延迟 import(风格)②无 system 时 system="" (Anthropic 接受)③测试里 fake_anthropic_post 死代码 ④base_url 无测试覆盖。③④在 034f39e 修(删死代码 + 加 test_openai_uses_custom_base_url),29 passed;①②延后(继承计划/无害)。
+- **人工干预**:控制器决定修 ③④(死代码清理 + spec 必需特性零覆盖),①②延后。
+
+### Task 7 · Action 模型 + 稳健解析器 — ✅ 完成 (3362c6d, fix f33e0c2)
+- **TDD**:RED = 模块不存在;GREEN = 4 新测试,`make test` 33 passed。
+- **产物**:aegiscode/protocol/{__init__,action.py,parser.py}。Action={thought,tool,arguments,expectation?}(无 is_final)。parse_action:优先 ```json 围栏,否则取最后一个合法顶层 JSON 对象,再 Pydantic 校验;失败抛 ActionParseError。
+- **两阶段评审**:**Needs fixes**——1 Important(真实 bug):初版 `_last_balanced` 是字符级括号计数,对"JSON 字符串值内含 `{`/`}`"(如 write_file 的 content 是代码)会误配、截断→对合法输入误报 ActionParseError。违反 SPEC §M3"稳健 JSON 提取"。判定为"计划示例代码的弱点,非规约选择",当场修。
+- **修复 f33e0c2**:改用 `json.JSONDecoder().raw_decode()` 逐 `{` 位置扫描(尊重 JSON 字符串转义),取最后一个成功解析的 dict;保持 parse_action/ActionParseError 公共名不变;补 2 个 braces-in-string 回归测试 + 异常链 from e。6 parser 测试全过(4 原 + 2 新),`make test` 35 passed。控制器直接验证(raw_decode 就位 + 6 测试过)代替再派评审。
+- **教训**:计划里"手写括号计数器"这类看似完整的示例代码可能不满足 spec 的"稳健"要求;评审用一个具体风险(字符串内括号)探到了它。这类"示例代码弱点"应按 spec 意图修复,而非因"计划这么写"就放行。
+
+### Task 8 · ToolResult + 工具注册表/接口 — ✅ 完成 (ccbd1de)
+- **TDD**:RED = 模块不存在;GREEN = 3 新测试,`make test` 38 passed。
+- **产物**:aegiscode/tools/{__init__,result.py,base.py,registry.py}。ToolResult(BaseModel,9 字段+默认);Tool(Protocol) name+run;ToolRegistry register/get(未知→None)/names。仅基座,无具体工具(符合 YAGNI)。
+- **两阶段评审**:spec ✅、quality Approved。2 Minor:ToolRegistry.get/register/names 缺类型注解(cosmetic,继承计划,mypy 可受益)。按 skill 将 Minor 记入账本交最终评审 triage,不即时修。
+- **人工干预**:无。
+
+### Task 9 · 文件工具(list/read/search/write)— ✅ 完成 (b65fed1, fix 4e9a98f)
+- **TDD**:RED = 模块不存在;GREEN = 4 新测试,`make test` 42 passed。
+- **产物**:aegiscode/tools/file_tools.py。四工具纯 IO(路径经 ctx.resolve,治理留给后续 dispatcher):WriteFileTool 写前查 write_max_bytes(用 encode 字节长)+ctx.snapshot+changed_files artifact;ReadFileTool NUL 嗅探→binary skipped;SearchTextTool os.walk+跳二进制;ListFilesTool 排序 listdir。
+- **两阶段评审**:spec ✅、quality Approved。1 Important(2 处 open().read() 泄漏句柄,与 T2 同类 bug;WriteFileTool 已用 with)+2 Minor(ListFilesTool 零测试覆盖、ReadFileTool 坏路径抛裸异常违反 ToolResult 契约)。全部在 4e9a98f 修:两读改 with、ReadFileTool 坏路径返回 TOOL_ERROR 结构化结果、补 ListFilesTool+坏路径测试。44 passed。
+- **人工干预**:控制器决定合并修 Important+2 Minor(句柄泄漏是重复 bug 类;坏路径必须走 ToolResult 契约否则主循环会崩而非收到 TOOL_ERROR 反馈)。
+- **里程碑**:Milestone 1(决策与工具基座)5 个 task 全部完成。下一步:全分支最终评审(opus)→ PR。
+
+### 全分支最终评审(Milestone 1)— READY TO MERGE
+- **评审 subagent**:opus。范围 fac0127..2515d1e,14 commits。
+- **结论**:READY TO MERGE。发现 1 Important + 3 Minor,当场在 4cd0081 修:
+  - **Important**:文件工具错误契约不一致——ReadFileTool(T9 修过)返回 TOOL_ERROR,但 ListFilesTool/WriteFileTool 仍让 OSError 逃逸 run()。全分支视角才暴露(单 task 评审看不到)。三工具统一为 ToolResult(TOOL_ERROR)。
+  - Minor:WriteFileTool 写入 pin encoding=utf-8(与 size check 的 encode 一致);ToolResult status/category 改 Literal 类型(拼写错误在校验期即报,SPEC §M9 八类 taxonomy,主循环靠它分支)。
+  - +4 回归测试(list 缺目录、write 不可写路径、bad status、bad category)。48 passed。
+- **延后(不阻塞)**:T6 Anthropic system=""(API 接受,won't-fix);_real_post 函数内 import(对离线确定性反而是优点);registry 注解(价值低)。
+- **多轮记录/status 分类等覆盖建议**:opus 建议后续加 MockLLM 多轮 received_messages[2] 断言(demo② 依赖)——记入 M4 主循环时补。
+- **人工干预**:控制器决定合并修 Important+2 Minor(错误契约是主循环安全网的关键一致性;Literal 让控制流 seam 防拼写错)。
+- **下一步**:PR + merge;之后 Milestone 2(治理,main contribution)。
