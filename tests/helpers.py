@@ -15,6 +15,37 @@ from aegiscode.tools.registry import ToolRegistry
 from aegiscode.tools.result import ToolResult
 
 
+
+# ---------------------------------------------------------------------------
+# FastAPI test client factory (used by test_api.py and future Task 28)
+# ---------------------------------------------------------------------------
+
+
+def make_api_client(tmp_path, scripted: list, final_ok: bool = True):
+    """Build a fastapi.testclient.TestClient over build_app(service).
+
+    Creates a sync=True ApplicationService (backed by MockLLM + tmp sqlite),
+    wraps it in the FastAPI app returned by build_app(), and returns a
+    TestClient ready to use in tests.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        pytest fixture; workspace root and sqlite db directory.
+    scripted : list[str]
+        JSON tool-call strings fed to MockLLM, one per LLM round.
+    final_ok : bool
+        Return value of the final_verifier (True = COMPLETED).
+    """
+    from fastapi.testclient import TestClient
+    from aegiscode.service.api import build_app
+
+    svc = make_service(tmp_path, scripted=scripted, final_ok=final_ok, sync=True)
+    app = build_app(svc)
+    return TestClient(app)
+
+
+
 class SpyCommandTool:
     """Replaces RunCommandTool in tests — never actually executes, just records."""
     name = "run_command"
