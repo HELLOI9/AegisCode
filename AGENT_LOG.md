@@ -149,3 +149,17 @@
 - **跟踪(非阻断,带入后续)**:scanner(T25)与 redactor(M0)重复维护 key 模式列表(今日完全一致,应合并单一源防漂移);is_governance_usable 仅咨询性,M4 主循环须逐行调用;classify 测试仅覆盖 8 类中 2 类(M4 接线时补)。
 - **人工干预**:控制器判定 type 过滤为阻断(书面验收未达)、尾部截断锚点与 key/tags 扫描当场折进一个修复提交;pattern-drift 合并 defer。
 - 下一步:PR + merge;之后 Milestone 4(主循环 T22 停机 + T23 HarnessCore,含 M2 遗留的治理 factory 装配硬性条件)。
+
+---
+
+## 2026-07-14 · Milestone 4(核心主循环)— 新 worktree
+**Worktree**:`.claude/worktrees/m4-core-loop`,分支同名(base = main @ 9dd51f8,M0+M1+M2+M3 已并入)。基线 make test = 119。
+**顺序**:T22 停机逻辑 → 治理 factory(M2 遗留硬性装配)→ T23 HarnessCore 主循环。实现/评审 sonnet,最终评审 opus。**纪律**:每个 task 完成即写本文件的 `### Task N` 条目 + PLAN 标记 + 账本行。
+**M2/M3 带入的硬性条件**:①factory 把 run_command→judge_command 与 config 驱动 default_fn 接进 dispatcher + 2 个 Dispatcher.dispatch 级集成测试(rm -rf DENY no-exec / write 越 allowlist REQUIRE_APPROVAL);②主循环消费记忆时逐行调用 is_governance_usable。
+
+### Task 22 · 停机原因 + 优先级判定 — ✅ 完成 (7b63874, +69867d7)
+- **技能**:subagent-driven-development;实现/评审 sonnet。
+- **TDD**:RED = 模块不存在;GREEN = 6 新测试,make test 125 passed。
+- **产物**:aegiscode/loop/{__init__,termination.py}。TerminationReason(str,Enum) 9 值;LoopCounters(step/consecutive_failures/invalid_actions/no_progress_hits);decide_termination 计数档优先级 INVALID_ACTION_LIMIT>CONSECUTIVE_FAILURES>NO_PROGRESS>MAX_STEPS,健康返回 None;非计数档(COMPLETED/FINISH_REJECTED/LLM_ERROR/INTERNAL_ERROR/CANCELLED)由主循环直接设置。
+- **两阶段评审**:spec ✅、quality Approved。2 Minor(缺返回注解、无同时触限的优先级测试)在 69867d7 修复 + 优先级测试,126 passed。
+- **人工干预**:控制器补返回注解与优先级断言(证计数档优先级不变量)。注:此 task 的 fix/PLAN/log 曾因工具输出中断丢失,恢复工具后重做并核实真实提交状态,未重复已完成实现。

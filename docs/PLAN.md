@@ -2129,7 +2129,7 @@ git commit -m "feat: context builder (6-tier budget + deterministic oldest-step 
 
 ---
 
-### Task 22: Termination reasons + priority decision
+### Task 22: Termination reasons + priority decision ✅ DONE (7b63874, +69867d7)
 
 **Files:**
 - Create: `aegiscode/loop/__init__.py`, `aegiscode/loop/termination.py`, `tests/loop/test_termination.py`
