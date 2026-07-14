@@ -2497,7 +2497,7 @@ git commit -m "feat: self-written secret scanner (CI + self-check)"
 
 ## Milestone 6 — Service / Interface
 
-### Task 26: ApplicationService (create/query/approve/cancel + persistence)
+### Task 26: ApplicationService (create/query/approve/cancel + persistence) ✅ DONE (f4ee46c, +ce96821)
 
 **Files:**
 - Create: `aegiscode/service/__init__.py`, `aegiscode/service/app_service.py`, `aegiscode/persistence/repositories.py`, `tests/service/test_app_service.py`

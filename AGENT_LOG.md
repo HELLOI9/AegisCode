@@ -220,3 +220,22 @@
 - **人工干预**:控制器在评审前用 python3 -c 复现短 key 掩码泄漏(set_key('xy')→'xy…xy'),将其作为重点交给评审并要求测试改为断言 '***' 而非弱断言;确认真 OpenAI key(~51 字符)不受影响但安全组件不应泄漏任何短密钥。
 - **验证**:xy/sk-1234→'***';sk-12345→'sk-…2345';sk-abcdef1234567890→'sk-…7890';全部 leak=False。
 - 下一步:PR + merge;之后 Milestone 6(服务/接口:T26 ApplicationService → T27 FastAPI → T28 WebUI / T29 CLI)。
+
+---
+
+## 2026-07-14 · Milestone 6(服务/接口)— 新 worktree
+**Worktree**:`.claude/worktrees/m6-service-interface`,分支同名(base = main @ cc5d867,M0-M5 已并入)。基线 make test = 165。链:T26 ApplicationService(+repositories)→ T27 FastAPI(8 端点)→ T29 CLI;T28 WebUI 依赖 T27。实现/评审 sonnet,最终评审 opus。每任务扩展 tests/helpers.py(T26 加 make_service,T27 加 make_api_client)。
+
+### Task 26 · ApplicationService(创建/查询/审批/取消 + 持久化)— ✅ 完成 (f4ee46c, +ce96821)
+- **技能**:subagent-driven-development;实现/评审 sonnet。
+- **TDD**:RED = 模块不存在;GREEN = 15 新测试,180 total;修复后 +2 async 测试,182 total 纯净。
+- **产物**:aegiscode/service/app_service.py + aegiscode/persistence/repositories.py + tests/helpers.py 加 make_service(sync 参数)。ApplicationService(db, db_path, config, harness_factory, sync=False):create_task(uuid,插 RUNNING 行,sync 内联/否则后台线程,跑 HarnessCore,按 TerminationReason 更新 COMPLETED/CANCELLED/FAILED)/get_task/get_events(since 严格 >N)/list_approvals/decide(approval_id,approved)/cancel/get_audit(verify_chain 元组解包 → chain_valid)。step 行由 run 后投影 audit_events(HarnessCore 未改)。参数化 SQL 无注入,schema.sql 未动。
+- **审批暂停/持久化/恢复(T23 遗留 seam 落地)**:REQUIRE_APPROVAL → 插 PENDING approval_requests 行 → 暂停 → decide() 更新状态并唤醒 → resolver 返回 approved → 循环 execute_approved。sync 模式用注入的 sync_decision_fn 确定性判定;async 用 threading.Event。
+- **两阶段评审**:spec ✅、quality Approved-with-caveats。
+  - Important:async resolver 存在 lost-wakeup 窗口(先插行后注册 Event,decide 可能错过)+ ev.wait 无超时(永久挂起)。修:_approvals_lock 保护;Event 先于插行注册;ev.wait 有界超时(approval_timeout_sec 或 3600s)超时 fail-closed → REJECTED;唤醒后重读 DB 状态。
+  - Important:make_service async 路径 AuditLog 仍包主线程连接(跨线程 sqlite 误用)。修:harness_factory 接 audit_conn,async 传 thread_conn,sync 传主连接。
+  - Minor:approval 行 step_index 硬编码 0。修:AuditEventRepository.latest_action_step_index 取真实 ACTION_PROPOSED step。
+  - Minor:approval_decisions 泄漏到生产构造函数。修:移除,改注入 sync_decision_fn(测试作用域)。
+  - ce96821 合修四项 + 2 async 测试(pause/resume 跨线程 + decide-before-wait 仍唤醒),async 测试 5s 硬上限轮询跑 5 次零 flaky。
+- **人工干预**:控制器判定 async 路径 bug 虽 M6 测试不触发但 T27 API 会以 async 驱动,升级为 must-fix(而非 defer);要求补真实跨线程 pause/resume 测试并加硬超时防 CI 挂起。
+- **安全**:参数化 SQL;后台线程各开自己的 DB 连接。
