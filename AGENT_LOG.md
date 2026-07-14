@@ -271,3 +271,12 @@
   - **I2**:凭据父目录 world-traversable。修:`os.makedirs(d, mode=0o700, exist_ok=True)` + 兜底 chmod。
   - Minor(未阻塞):`serve --host 0.0.0.0` 仍显示 localhost 横幅未告警;init 写文件后 load_config 未 guard(模板恒有效不可触发);test 双读 capsys;demo ctx 省略 snapshot/write_max_bytes(DENY 早于执行,无害)。
 - **人工干预**:控制器判定 C1 为真实治理回退(非误报),要求以「围栏锚定 ctx.workspace_root」的架构正确方案(同时修 run+serve)而非仅 CLI 层对齐 config;修复后独立复现确认 secret 不泄漏;折叠 I1/I2 凭据权限修复入同一修复轮。
+
+### Milestone 6 · 最终整支评审(opus)+ I-1/I-2 硬化 — ✅ APPROVED (merge OK)
+- **范围**:14 commits,+3192 行(service/interface 层)。全量 231→233。ruff:M6 新增/触碰的文件 0 error(仅 pre-existing 非 M6 文件有 E401/E701 风格债)。
+- **SPEC 合规复核(全 PASS)**:§12 自实现主循环无 Agent SDK(grep langchain/autogen/crewai/… 皆无;assembly 直接装配 HarnessCore);§A.4C 离线可测(tests 无 requests/urllib/socket/httpx;serve 测试 monkeypatch uvicorn.run;openai 无 key 在 build_llm 提前 NoKeyError);§13 八端点齐全且命名精确、/credentials/status 仅 {configured,masked}、WebUI 必做集齐(启动+事件流+审批+diff+最终态+审计/verify);C1 围栏修复两处调用点均 ctx.workspace_root 且 run/serve 双路径生效;changed_files 加法式入 TOOL_EXECUTED payload,经 redact+SHA256,verify_chain 确定性不破;凭据 os.open(0o600) 创建期即受限 + makedirs(0o700),getpass 不回显。
+- **0 Critical**。集成检查全绿:harness_factory 签名两处调用点一致;跨线程 sqlite 各开连接不共享;WebUI 字段与仓储行形状全对齐;diff 端到端非死代码;demo 真实拦截 rm -rf / (executed count==0);500 handler 不泄漏。
+- **I-1(Important,已修 553873d)**:open_db 无 PRAGMA busy_timeout → async 模式后台线程写 audit 与主线程 decide() UPDATE approval 撞写,WAL 单写者下 SQLITE_BUSY 立即抛错 → 审批决定被静默丢弃(行留 PENDING 直到 resolver fail-close,最坏挂 1h)。修:busy_timeout=5000,第二写者等亚毫秒锁而非报错。serve/审批路径正确性修复。
+- **I-2(Important,已修 46874b6)**:async pause/resume 从未经 API 层测试(所有 API 测试 sync=True)——正是掩盖 I-1 的集成缺口。补:make_async_api_client(sync=False)+ 两条 HTTP 端到端测试(approve → COMPLETED + 行 APPROVED + chain_valid;reject → 副作用断言 secret.txt 永不落盘 + 行 REJECTED),_poll_http 5s 硬上限防挂。RED 揭示真实行为事实:reject 的写被拒但循环仍可 finish(治理拒的是动作非整轮),故 reject 断言改用确定性副作用。
+- **人工干预**:控制器将 I-1/I-2 从"fast-follow 建议"升级为合并前必修(理由:两者都落在本里程碑主推的 serve async 审批路径,且 AegisCode 以审批正确性为卖点);I-1 一行内核修复由控制器直接落地并加 doc 注释,I-2 派 subagent 补 API 层回归测试(同时守护 I-1)。
+- **Minor(未阻塞,记录留待清理)**:test_app_service 若干 vacuous 断言(state in 全集 / step_count>=0;机制实为别处严格断言覆盖);redact 未传 workspace_root(绝对路径相对化分支未启用,当前工具皆相对路径无泄漏);test_run_openai 双调 capsys.readouterr()。
