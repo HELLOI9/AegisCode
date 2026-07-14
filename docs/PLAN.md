@@ -1405,7 +1405,7 @@ git commit -m "feat: command lexer + structure-safety layer (metastructure -> re
 
 ---
 
-### Task 14: Command allowlist + dangerous-param rules (甲, layers 3–4)
+### Task 14: Command allowlist + dangerous-param rules (甲, layers 3–4) ✅ DONE (85a1905, +839ceac)
 
 **Files:**
 - Create: `aegiscode/governance/command_rules.py`, `tests/governance/test_command_rules.py`
