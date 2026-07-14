@@ -294,3 +294,164 @@ def test_credentials_status_no_credential_store(tmp_path):
     r = client.get("/credentials/status")
     assert r.status_code == 200
     assert "masked" in r.json()
+
+
+# ---------------------------------------------------------------------------
+# Async pause/resume approval cycle — driven entirely over HTTP (T29, I-2 gap)
+# ---------------------------------------------------------------------------
+# Every test above uses a sync=True service (make_api_client hardcodes sync=True),
+# so the async pause/resume decision path was never exercised through FastAPI.
+# These tests build a sync=False service and drive the full cycle over HTTP:
+#   POST /tasks -> poll GET .../approvals for PENDING -> POST .../decision
+#   -> poll GET /tasks/{id} until terminal. The approval decision travels the
+# real endpoint -> service.decide() -> threading.Event wakeup path, and acts as
+# the regression guard for the busy_timeout fix (I-1) on the concurrent async
+# write path.
+
+import time  # noqa: E402  (grouped with the async-cycle block below)
+
+import pytest  # noqa: E402
+
+from tests.helpers import make_async_api_client  # noqa: E402
+
+# Scripted MockLLM sequence copied verbatim from
+# tests/service/test_app_service.py::test_async_pause_resume_approve: a write_file
+# to a path NOT in the write allowlist forces a real REQUIRE_APPROVAL pause, then
+# finish completes the run once the write is approved.
+SCRIPTED_APPROVAL = [
+    '{"tool":"write_file","arguments":{"path":"secret.txt","content":"x"}}',
+    '{"tool":"finish","arguments":{}}',
+]
+
+
+def _poll_http(fn, until, cap_sec=5.0, interval=0.05):
+    """Poll fn() until until(result) is truthy or cap_sec elapses; return last result.
+
+    Bounded by a hard monotonic deadline so a regressed async path can never hang
+    CI: at most cap_sec/interval iterations, each separated by a small sleep. The
+    caller inspects the returned value and fails explicitly if the target state
+    was not reached in budget.
+    """
+    deadline = time.monotonic() + cap_sec
+    result = fn()
+    while not until(result):
+        if time.monotonic() > deadline:
+            return result
+        time.sleep(interval)
+        result = fn()
+    return result
+
+
+def test_async_approval_cycle_approve_over_http(tmp_path):
+    """Full async pause/resume APPROVE cycle, driven only over HTTP.
+
+    The harness pauses on a REQUIRE_APPROVAL (write outside the allowlist) on a
+    background thread; the approval is granted via POST /approvals/{id}/decision;
+    the loop resumes and the task reaches COMPLETED with a valid audit chain.
+    """
+    client, _svc = make_async_api_client(tmp_path, scripted=SCRIPTED_APPROVAL, final_ok=True)
+
+    # 1) Create the task; async mode returns immediately with a task_id.
+    r = client.post("/tasks", json={"workspace": str(tmp_path), "description": "async approve over http"})
+    assert r.status_code == 200
+    tid = r.json()["task_id"]
+
+    # 2) Poll for a PENDING approval to appear (harness thread is paused).
+    approvals = _poll_http(
+        lambda: client.get(f"/tasks/{tid}/approvals").json(),
+        until=lambda rows: any(a["state"] == "PENDING" for a in rows),
+        cap_sec=5.0,
+    )
+    pending = [a for a in approvals if a["state"] == "PENDING"]
+    if not pending:
+        pytest.fail("no PENDING approval appeared over HTTP within 5s (async pause did not happen)")
+
+    # Teeth: at the moment a PENDING approval exists, the task must NOT already be
+    # terminal — proving a genuine pause happened (not a sync shortcut).
+    task_now = client.get(f"/tasks/{tid}").json()
+    assert task_now["state"] not in ("COMPLETED", "FAILED", "CANCELLED"), (
+        f"task was already terminal ({task_now['state']}) while an approval was PENDING; "
+        "the async pause did not actually block"
+    )
+
+    approval_id = pending[0]["approval_id"]
+    assert pending[0]["step_index"] >= 0
+
+    # 3) Approve over HTTP -> service.decide() sets the Event -> thread wakes.
+    d = client.post(f"/approvals/{approval_id}/decision", json={"approved": True})
+    assert d.status_code == 200
+
+    # 4) Poll GET /tasks/{id} until terminal; must be COMPLETED (approval honored).
+    task = _poll_http(
+        lambda: client.get(f"/tasks/{tid}").json(),
+        until=lambda row: row["state"] in ("COMPLETED", "FAILED", "CANCELLED"),
+        cap_sec=5.0,
+    )
+    if task["state"] not in ("COMPLETED", "FAILED", "CANCELLED"):
+        pytest.fail(f"task never reached a terminal state within 5s (stuck at {task['state']})")
+    assert task["state"] == "COMPLETED"
+
+    # The approval row is now terminally APPROVED.
+    final = client.get(f"/tasks/{tid}/approvals").json()
+    row = [a for a in final if a["approval_id"] == approval_id]
+    assert row and row[0]["state"] == "APPROVED"
+
+    # 5) Audit chain over HTTP must verify.
+    audit = client.get(f"/tasks/{tid}/audit").json()
+    assert audit["chain_valid"] is True
+
+
+def test_async_approval_cycle_reject_over_http(tmp_path):
+    """Full async pause/resume REJECT cycle, driven only over HTTP.
+
+    The write outside the allowlist is rejected over HTTP. The deterministic,
+    non-flaky signal is the concrete side effect: a rejected write must NOT create
+    the target file. (The task's terminal state after a reject is NOT asserted --
+    the harness can still proceed to finish and the run may COMPLETE for other
+    reasons; only the denied action's effect is guaranteed absent.)
+    """
+    import os
+
+    client, _svc = make_async_api_client(tmp_path, scripted=SCRIPTED_APPROVAL, final_ok=True)
+
+    r = client.post("/tasks", json={"workspace": str(tmp_path), "description": "async reject over http"})
+    assert r.status_code == 200
+    tid = r.json()["task_id"]
+
+    approvals = _poll_http(
+        lambda: client.get(f"/tasks/{tid}/approvals").json(),
+        until=lambda rows: any(a["state"] == "PENDING" for a in rows),
+        cap_sec=5.0,
+    )
+    pending = [a for a in approvals if a["state"] == "PENDING"]
+    if not pending:
+        pytest.fail("no PENDING approval appeared over HTTP within 5s (async pause did not happen)")
+    approval_id = pending[0]["approval_id"]
+
+    # Reject over HTTP -> service.decide(False) sets the Event -> thread wakes and
+    # the denied write is NOT executed.
+    d = client.post(f"/approvals/{approval_id}/decision", json={"approved": False})
+    assert d.status_code == 200
+
+    # Wait for the run to finish so any (non-)write has definitely happened.
+    task = _poll_http(
+        lambda: client.get(f"/tasks/{tid}").json(),
+        until=lambda row: row["state"] in ("COMPLETED", "FAILED", "CANCELLED"),
+        cap_sec=5.0,
+    )
+    if task["state"] not in ("COMPLETED", "FAILED", "CANCELLED"):
+        pytest.fail(f"task never reached a terminal state within 5s (stuck at {task['state']})")
+
+    # Deterministic: the rejected write must never have created the file.
+    assert not os.path.exists(os.path.join(str(tmp_path), "secret.txt")), (
+        "rejected write_file must not create the target file"
+    )
+
+    # The approval row is terminally REJECTED.
+    final = client.get(f"/tasks/{tid}/approvals").json()
+    row = [a for a in final if a["approval_id"] == approval_id]
+    assert row and row[0]["state"] == "REJECTED"
+
+    # Audit chain must still verify even on the reject path.
+    audit = client.get(f"/tasks/{tid}/audit").json()
+    assert audit["chain_valid"] is True

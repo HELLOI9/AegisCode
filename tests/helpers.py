@@ -45,6 +45,26 @@ def make_api_client(tmp_path, scripted: list, final_ok: bool = True):
     return TestClient(app)
 
 
+def make_async_api_client(tmp_path, scripted: list, final_ok: bool = True):
+    """Build a TestClient over an ASYNC (sync=False) ApplicationService.
+
+    Unlike make_api_client, the service runs each task on a background thread and
+    approval decisions must arrive through the real POST /approvals/{id}/decision
+    endpoint (which calls service.decide() -> threading.Event wakeup). No
+    sync_decision_fn is wired, so the harness genuinely pauses on a
+    REQUIRE_APPROVAL until an HTTP decision unblocks it.
+
+    Returns (client, service) so tests can also assert directly on the service
+    if needed; nearly all interaction should go through the HTTP client.
+    """
+    from fastapi.testclient import TestClient
+    from aegiscode.service.api import build_app
+
+    svc = make_service(tmp_path, scripted=scripted, final_ok=final_ok, sync=False)
+    app = build_app(svc)
+    return TestClient(app), svc
+
+
 
 class SpyCommandTool:
     """Replaces RunCommandTool in tests — never actually executes, just records."""
