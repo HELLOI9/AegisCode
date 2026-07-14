@@ -440,3 +440,9 @@
 - **挖出真实 bug(已修 1fc6ea4)**:§五 clean-env 测试暴露 `_load_config` 无配置文件时**直接返回 `AegisConfig()`,绕过 `load_config` → `AEGIS_LLM_PROVIDER` 环境覆盖被静默忽略**。容器内无 aegis.yaml,故 `serve` 恒用 `provider=openai`,`-e AEGIS_LLM_PROVIDER=mock` 无效 → MockLLM 模式无法起服务(破 §五/§八)。TDD 修:loader 抽出 `_apply_env_overrides` 单一真源 + `load_defaults(env)`,无文件路径也应用覆盖;红(openai≠mock)→ 绿。321 passed。
 - **容器内经验验证(修复后重建镜像)**:`-e AEGIS_LLM_PROVIDER=mock` 无 key 起服务成功;`GET /`=200 + 标题 + app.js/style.css 加载;`/credentials/status`=`{"configured":false,"masked":null}`(无明文);workspace 围栏在容器内生效(`POST /tasks` 越界 `/tmp/acc`→400,in-base→200);镜像 `GPG_KEY` 与 stock `python:3.12-slim` 逐字节相同(Python 发行签名公钥,非本项目密钥);容器 clean exit(0)无 stray 进程。
 - **`GET /tasks` 405**:设计如此(无 collection-GET 路由,任务经 `GET /tasks/{id}` 读),非缺陷。
+
+#### 最终整分支评审(§二,opus)— 0 Critical / 1 Important(已修)
+- opus reviewer 读全量 `main..HEAD`(16 commit,+2299/-47),跑 `pytest`(321)+ 两个 demo 入口,并构造对抗探针(22 条命令、fence 越界/敏感)。**0 Critical**:命令治理、审批绑定、双路径围栏、workspace 围栏、超时全部扛住,每个失败模式都 fail-closed。
+- **1 Important(已修 11f0995)**:`run_command` 路径围栏**误拒**参数中仅"包含"敏感词的合法命令——`git commit -m added-credentials-helper`、`git checkout credentials-fix`、`git branch feature/credentials` 全被 `CMD_PATH_FENCE` 硬拒,把 `git commit` 从应有的 REQUIRE_APPROVAL 静默降级。fail-closed(过度拦截非漏洞),但破坏 agent 常用的受治理路径(commit message/branch 名由模型生成、含 "credentials" 很常见)。
+- **控制器独立复现 + TDD 修复**:分离 fence 混淆的两种威胁——**逃逸**(路径解析到 workspace 外,对**任何**命令都是威胁→恒拒,`git apply /etc/passwd`/`python ../x`/`rm -rf /` 仍拒);**敏感名**(workspace 内、basename 命中 `.env`/`*.pem` 等,仅当命令**把它当文件消费**——python/pytest/ruff/mypy——才是读/执行威胁;git/pip 的裸敏感词 token 是 ref/message/package 非文件访问,不 fence,交策略引擎判定,`python .env`/`key.pem` 仍拒)。另停止 fence argv0(allowlist own 它)。4 条非回归测试,全量 321→325,make demo 3 passed。
+- **Minor(评审记录,未阻塞)**:demo1 docstring 陈旧(`rm -rf /` 现经 `CMD_PATH_FENCE` 拒非 allowlist,已顺手修);两套 demo 入口共存(`make demo` 评分集 / `aegiscode demo` SPEC 集,README §10 已注明,可合并后整合);`ci_secret_scan` 行钉 43→44 已核对无误。
