@@ -25,6 +25,7 @@ class AuditLog:
             "INSERT INTO audit_events(task_id,step_index,timestamp,event_type,payload_json,prev_hash,hash)"
             " VALUES(?,?,?,?,?,?,?)",
             (task_id, step_index, ts, str(event_type), payload_json, prev, h))
+        self.conn.commit()
         return h
 
     def verify_chain(self, task_id):

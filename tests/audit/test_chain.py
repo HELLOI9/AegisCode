@@ -24,3 +24,29 @@ def test_payload_redacted(tmp_path):
     log.append("t1", 0, EventType.TOOL_EXECUTED, {"out":"token=sk-abcdef1234567890abcdef1234567890"})
     row = conn.execute("SELECT payload_json FROM audit_events").fetchone()[0]
     assert "sk-abcdef" not in row
+
+def test_tamper_hash_mutation_detected(tmp_path):
+    conn = open_db(str(tmp_path / "a.db"))
+    log = AuditLog(conn)
+    for i in range(3):
+        log.append("t1", i, EventType.TOOL_EXECUTED, {"i": i})
+    # mutate the stored hash of the middle row, leave payload intact
+    conn.execute("UPDATE audit_events SET hash='deadbeef' WHERE task_id='t1' AND step_index=1")
+    ok, bad = log.verify_chain("t1")
+    assert ok is False and bad == 1
+
+def test_tamper_row_deletion_detected(tmp_path):
+    conn = open_db(str(tmp_path / "a.db"))
+    log = AuditLog(conn)
+    for i in range(3):
+        log.append("t1", i, EventType.TOOL_EXECUTED, {"i": i})
+    conn.execute("DELETE FROM audit_events WHERE task_id='t1' AND step_index=1")
+    ok, bad = log.verify_chain("t1")
+    assert ok is False   # deletion breaks the running prev-hash chain
+
+def test_intact_chain_after_appends_verifies(tmp_path):
+    conn = open_db(str(tmp_path / "a.db"))
+    log = AuditLog(conn)
+    for i in range(5):
+        log.append("t1", i, EventType.FEEDBACK, {"i": i})
+    assert log.verify_chain("t1") == (True, None)
