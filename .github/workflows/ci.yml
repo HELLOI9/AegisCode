@@ -16,6 +16,10 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: make test
+      # Mechanism demos run in CI under MockLLM (zero-network, no API key).
+      # `make demo` exits non-zero if any demo's contract check fails, so this
+      # gates the pipeline — it is NOT guarded with `|| true`.
+      - run: make demo
 
   secret-scan:
     runs-on: ubuntu-latest

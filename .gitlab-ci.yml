@@ -16,6 +16,11 @@ unit-test:
   script:
     - pip install -e ".[dev]"
     - make test
+    # Mechanism demos run in CI too (acceptance §七): MockLLM only, zero-network,
+    # NO real API key. `make demo` exits non-zero if any demo's contract check
+    # fails, so a broken guardrail/feedback/approval mechanism fails this job —
+    # it is NOT guarded with `|| true` and never unconditionally returns 0.
+    - make demo
 
 secret-scan:
   stage: security
