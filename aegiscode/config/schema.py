@@ -66,6 +66,14 @@ class Governance(_Strict):
 
 class Workspace(_Strict):
     root: str = "/workspace"
+    # Server-side "allowed workspace base": a caller-supplied workspace (POST
+    # /tasks) is accepted ONLY if it is this directory or a subdirectory of it
+    # (realpath + commonpath, symlink-safe). None means "derive from root", so
+    # by default the allowed base IS `root`. This is defense-in-depth on top of
+    # the localhost-only API posture: it stops a caller from setting
+    # workspace="/" and turning the path fence's own anchor into arbitrary host
+    # write/exec (acceptance §八).
+    allowed_base: str | None = None
 
 
 class Tools(_Strict):

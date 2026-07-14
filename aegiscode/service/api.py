@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from aegiscode.credentials.store import CredentialStore
-from aegiscode.service.app_service import ApplicationService
+from aegiscode.service.app_service import ApplicationService, WorkspaceNotAllowedError
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +102,18 @@ def build_app(
 
     @app.post("/tasks")
     def create_task(body: CreateTaskRequest) -> dict:
-        """Create a task and start execution. Returns the task_id."""
-        task_id = service.create_task(
-            workspace=body.workspace,
-            description=body.description,
-        )
+        """Create a task and start execution. Returns the task_id.
+
+        A workspace outside the server-side allowed base is rejected with 400
+        and NO task is created (defense-in-depth over the localhost-only posture).
+        """
+        try:
+            task_id = service.create_task(
+                workspace=body.workspace,
+                description=body.description,
+            )
+        except WorkspaceNotAllowedError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
         return {"task_id": task_id}
 
     # -----------------------------------------------------------------------

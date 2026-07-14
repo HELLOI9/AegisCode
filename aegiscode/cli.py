@@ -156,6 +156,15 @@ def _cmd_run(args) -> int:
     store = build_credential_store()
     db_path = str(_data_dir() / "aegis.db")
 
+    # The CLI operator is trusted (they already have a shell) and names the
+    # workspace explicitly via --workspace. That explicit choice IS the allowed
+    # base for this run, so the service-layer workspace fence (which defends the
+    # UNauthenticated HTTP API against a caller-chosen workspace like "/") does
+    # not reject the operator's own directory when it lives outside the default
+    # config root. Only set it when the caller didn't already pin allowed_base.
+    if cfg.workspace.allowed_base is None:
+        cfg.workspace.allowed_base = args.workspace
+
     # Run synchronously so the task reaches a terminal state before we return.
     try:
         service = build_service(cfg, store, db_path, sync=True)
