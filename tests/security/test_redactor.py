@@ -35,3 +35,28 @@ def test_workspace_sibling_prefix_not_mangled():
 def test_workspace_bare_root_stripped():
     out = redact("at /workspace done", workspace_root="/workspace")
     assert "/workspace" not in out
+
+def test_redacts_openai_project_key():
+    # Modern dominant format: sk-proj-... contains hyphens, so the old
+    # sk-[A-Za-z0-9]{20,} pattern missed it. Use a BARE context (no KEY=
+    # prefix) so only the sk- family pattern can catch it -- this is the
+    # defense-in-depth case where a key leaks into an error message.
+    key = "sk-proj-1a2B3c4D_5e6F-7g8H9i0JklmnopQRs"
+    assert key not in redact(f"invalid credential {key} rejected")
+
+def test_redacts_openai_svcacct_key():
+    key = "sk-svcacct-abc123DEF456ghi789_JKL-012mno"
+    assert key not in redact(f"used {key} for auth")
+
+def test_still_redacts_legacy_openai_key():
+    key = "sk-abcdef1234567890abcdef1234567890"
+    assert key not in redact(f"saw {key} in output")
+
+def test_still_redacts_anthropic_key():
+    out = redact("KEY=sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXX")
+    assert "sk-ant-" not in out
+
+def test_short_sk_token_not_over_redacted():
+    # A bare/short sk- fragment in ordinary text must NOT be redacted.
+    assert redact("sk-short") == "sk-short"
+    assert redact("please run the task-list-view") == "please run the task-list-view"
