@@ -257,3 +257,17 @@
 - **两阶段评审**:Stage1 SPEC 合规 — 资产服务、字段名与 schema 全对齐、水位正确、轮询无泄漏、native-only、masked-only 均 PASS。Stage2 质量 — 0 Critical。**1 Important**:`renderDiff` 为死代码 / 未满足 SPEC §13「diff 必做」— TOOL_EXECUTED 审计 payload 仅 `{tool,status}`,丢弃 `result.artifacts`,故 changed_files 永不到达 UI。Minor:poll 无重入守卫(localhost 单用户无害)、brief 提及的 README 手测步骤未写、step_count 运行中显示 0。
 - **Important 修复(a4db1c2,TDD)**:harness.py 在 TOOL_EXECUTED 追加 `changed_files`(仅当 `result.artifacts.get("changed_files")` 真值时,写工具有、run_tests/finish 无噪声键);payload 经 `redact` + 哈希,不改 schema/哈希/脱敏;`verify_chain` 不受影响(哈希动态计算无 golden)。app.js `renderDiff` 改为读 `payload.changed_files`,非空数组时渲染「changed files (N)」列表,逐条经 `textContent`(XSS 安全)。+2 harness 测试(写工具有键 / 只读工具无键)+ 1 WebUI 测试(app.js 含 changed-files 渲染逻辑)。全文本快照 diff 仍延后至 v2(SPEC line 113 写前快照 = SHOULD)。
 - **人工干预**:控制器核实 Important 属实(SPEC §13 line 257「diff 必做」),判定为在范围内的 v1 合规缺口而非可延后项 → 派 fix subagent 以 TDD 打通 artifacts→审计→WebUI 数据链;另清理 kernel 预存 F841(harness.py:79 未用 `exc` 绑定,3bfa682)使治理内核 ruff 干净。
+
+### Task 29 · CLI(init/run/serve/config/key/demo)+ 生产装配 + 凭据后端 — ✅ 完成 (95863ad, +09f1420)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet,修复 sonnet。
+- **TDD**:RED = `aegiscode.cli` 不存在;GREEN = 13 CLI 测试绿,226 total;评审修复后 +5 测试,231 total,ruff 干净,全离线(MockLLM + 猴补 uvicorn.run,零网络零绑定)。
+- **产物**:
+  - `aegiscode/cli.py` — `main(argv) -> int` argparse 分发六子命令。`init` 脚手架 aegis.yaml(往返有效);`config` 校验+打印,ConfigError/OSError → rc=2;`key set|status|clear`(set 用 getpass,永不回显明文;status 复用 `CredentialStore.status()` 掩码);`run --workspace --task [--watch]`(sync=True 保证进程退出前到终态);`serve`(sync=False 后台线程,localhost-only);`demo`(最小 MockLLM 零网络治理 DENY 演示,非 T31 四演示套件)。
+  - `aegiscode/service/assembly.py` — **全系统首次真实装配**:`build_service(config, credential_store, db_path, sync)` + `build_llm(config, key)`(mock/openai/anthropic 分发,无 key → NoKeyError → CLI 友好非零退出)+ 真实 `ToolRegistry`(仅 `config.tools.enabled`)+ 真实 dispatcher + 真实 `final_verifier`(复跑反馈命令,COMPLETED 由验证器绿而非 LLM 声称)。`harness_factory` 五参签名与 ApplicationService 两处调用点精确匹配;跨线程 sqlite 干净(async 各开自己连接,audit 建在 audit_conn 上)。
+  - `aegiscode/credentials/backend.py` — `build_credential_store(env)`:AEGIS_HOME → JSON 文件后端(测试可 hermetic + keyring 不可用降级),否则 keyring(`except Exception` 降级到 `~/.aegiscode` JSON)。复用 CredentialStore 掩码。
+- **两阶段评审**:Stage1 SPEC 合规 — 六子命令齐全、key 不泄漏明文、自实现 harness(无 SDK)、离线确定性 均 PASS。Stage2 质量 — **1 Critical + 2 Important**,已全部修复:
+  - **C1(CRITICAL,治理主场维度)**:路径围栏锚定 `config.workspace.root`(dispatcher 构建时冻结,默认 `/workspace`)而非每任务 `ctx.workspace_root`。测试中两者相等故未暴露;主机 `run --workspace X` / `serve`(每请求 workspace)路径下两者发散 → 工位内 `report.txt → .env` 软链绕过围栏(**回退了 b48f4a9 的软链修复**)。修:`dispatch()` 与 `execute_approved()` 均改 `root = getattr(ctx,'workspace_root',None) or pc.workspace_root`,`path_fence.py` 算法未动。**控制器独立复现**:发散根 + 工位内软链 → 修复后 DENY/PATH_FENCE、status=denied、secret 未泄漏(非测试戏法)。
+  - **I1**:凭据文件 chmod-after-write 存在 world-readable 窗口。修:`os.open(path, O_WRONLY|O_CREAT|O_TRUNC, 0o600)` 创建即受限。
+  - **I2**:凭据父目录 world-traversable。修:`os.makedirs(d, mode=0o700, exist_ok=True)` + 兜底 chmod。
+  - Minor(未阻塞):`serve --host 0.0.0.0` 仍显示 localhost 横幅未告警;init 写文件后 load_config 未 guard(模板恒有效不可触发);test 双读 capsys;demo ctx 省略 snapshot/write_max_bytes(DENY 早于执行,无害)。
+- **人工干预**:控制器判定 C1 为真实治理回退(非误报),要求以「围栏锚定 ctx.workspace_root」的架构正确方案(同时修 run+serve)而非仅 CLI 层对齐 config;修复后独立复现确认 secret 不泄漏;折叠 I1/I2 凭据权限修复入同一修复轮。

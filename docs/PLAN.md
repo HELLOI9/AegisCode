@@ -2643,7 +2643,7 @@ git commit -m "feat: native WebUI (polling event stream + approval panel + audit
 
 ---
 
-### Task 29: CLI (init/run/serve/config/key/demo)
+### Task 29: CLI (init/run/serve/config/key/demo) ✅ DONE (95863ad, +09f1420)
 
 **Files:**
 - Create: `aegiscode/cli.py`, `tests/test_cli.py`; Modify: `pyproject.toml` (`[project.scripts] aegiscode = "aegiscode.cli:main"`)
