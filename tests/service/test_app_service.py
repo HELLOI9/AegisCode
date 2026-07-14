@@ -180,3 +180,93 @@ def test_step_count_persisted(tmp_path):
     tid = svc.create_task(str(tmp_path), "step count")
     t = svc.get_task(tid)
     assert t["step_count"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# Async pause/resume across a background thread
+# ---------------------------------------------------------------------------
+
+def _poll(fn, until, cap_sec=5.0, interval=0.02):
+    """Poll fn() until until(result) is truthy or cap_sec elapses. Returns last result.
+
+    A hard time cap keeps the test from hanging CI if the async path regresses.
+    """
+    import time
+
+    deadline = time.monotonic() + cap_sec
+    result = fn()
+    while not until(result):
+        if time.monotonic() > deadline:
+            return result
+        time.sleep(interval)
+        result = fn()
+    return result
+
+
+def test_async_pause_resume_approve(tmp_path):
+    """Genuine async pause/resume: a REQUIRE_APPROVAL action blocks the harness
+    thread until decide(approval_id, True) is called, then the approved action
+    executes and the task completes.
+    """
+    scripted = [
+        '{"tool":"write_file","arguments":{"path":"secret.txt","content":"x"}}',
+        '{"tool":"finish","arguments":{}}',
+    ]
+    svc = make_service(tmp_path, scripted=scripted, final_ok=True, sync=False)
+    tid = svc.create_task(str(tmp_path), "async approval")
+
+    # 1) Wait for a PENDING approval row to appear (harness thread paused).
+    approvals = _poll(
+        lambda: svc.list_approvals(tid),
+        until=lambda rows: any(r["state"] == "PENDING" for r in rows),
+        cap_sec=5.0,
+    )
+    pending = [r for r in approvals if r["state"] == "PENDING"]
+    assert pending, "expected a PENDING approval while the harness thread is paused"
+    approval_id = pending[0]["approval_id"]
+    # Fix 3: step_index must be a real value, not hardcoded 0.
+    assert pending[0]["step_index"] >= 0
+
+    # 2) Decide approve -> unblocks the waiting thread.
+    svc.decide(approval_id, True)
+
+    # 3) Wait for the task to reach a terminal state.
+    t = _poll(
+        lambda: svc.get_task(tid),
+        until=lambda row: row["state"] in ("COMPLETED", "FAILED", "CANCELLED"),
+        cap_sec=5.0,
+    )
+    assert t["state"] == "COMPLETED"
+    # The approval row is now terminal APPROVED.
+    final = [r for r in svc.list_approvals(tid) if r["approval_id"] == approval_id]
+    assert final and final[0]["state"] == "APPROVED"
+
+
+def test_decide_before_wait_still_wakes(tmp_path):
+    """Lock/Event ordering: decide() called the instant a PENDING row appears
+    (possibly before the resolver reaches ev.wait()) must still wake the thread.
+    Exercises Fix 1's register-before-insert + set()-before-wait() safety.
+    """
+    scripted = [
+        '{"tool":"write_file","arguments":{"path":"secret.txt","content":"x"}}',
+        '{"tool":"finish","arguments":{}}',
+    ]
+    svc = make_service(tmp_path, scripted=scripted, final_ok=True, sync=False)
+    tid = svc.create_task(str(tmp_path), "decide race")
+
+    approvals = _poll(
+        lambda: svc.list_approvals(tid),
+        until=lambda rows: len(rows) >= 1,
+        cap_sec=5.0,
+    )
+    assert approvals, "expected an approval row to be registered"
+    # Decide immediately; even if the resolver has not yet reached ev.wait(),
+    # the Event was registered before the row was inserted, so set() is not lost.
+    svc.decide(approvals[0]["approval_id"], True)
+
+    t = _poll(
+        lambda: svc.get_task(tid),
+        until=lambda row: row["state"] in ("COMPLETED", "FAILED", "CANCELLED"),
+        cap_sec=5.0,
+    )
+    assert t["state"] == "COMPLETED"

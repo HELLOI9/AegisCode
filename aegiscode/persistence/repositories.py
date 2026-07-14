@@ -118,8 +118,12 @@ class ApprovalRepository:
         triggered_rule_id: str | None,
         reason: str,
         risk_explanation: str,
+        approval_id: str | None = None,
     ) -> str:
-        approval_id = str(uuid.uuid4())
+        # Callers may pre-generate the id (e.g. to register a wakeup Event
+        # before the row is visible to other threads); otherwise mint one here.
+        if approval_id is None:
+            approval_id = str(uuid.uuid4())
         now = _now_iso()
         self._conn.execute(
             "INSERT INTO approval_requests("
@@ -192,6 +196,20 @@ class AuditEventRepository:
 
     def __init__(self, conn):
         self._conn = conn
+
+    def latest_action_step_index(self, task_id: str) -> int:
+        """Return step_index of the most recent ACTION_PROPOSED event for task_id.
+
+        Used when recording an approval request so the row's step_index joins
+        correctly to the steps table. Returns 0 if no such event exists yet.
+        """
+        row = self._conn.execute(
+            "SELECT step_index FROM audit_events"
+            " WHERE task_id=? AND event_type=?"
+            " ORDER BY event_id DESC LIMIT 1",
+            (task_id, "ACTION_PROPOSED"),
+        ).fetchone()
+        return int(row[0]) if row is not None else 0
 
     def list_since(self, task_id: str, since: int) -> list[dict]:
         """Return events for task_id with event_id > since."""

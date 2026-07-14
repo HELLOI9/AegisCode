@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import uuid
 from typing import Callable
 
 from aegiscode.audit.chain import AuditLog
@@ -60,13 +61,23 @@ class ApplicationService:
         Filesystem path to the sqlite file (so background threads can open it).
     config : AegisConfig
     harness_factory : Callable
-        Called as harness_factory(task_id, workspace, approval_resolver, cancel_check)
-        and must return a HarnessCore.
+        Called as harness_factory(task_id, workspace, approval_resolver,
+        cancel_check, audit_conn) and must return a HarnessCore. audit_conn is
+        the connection the harness must build its AuditLog on (the execution
+        thread's connection), so sqlite is never used cross-thread.
     sync : bool
         If True, run inline; if False, run in background thread.
-    approval_decisions : dict | None
-        For sync mode tests: maps approval_id (or "*") -> bool.
+    sync_decision_fn : Callable[[str], bool] | None
+        Sync-mode only: given an approval_id, returns True to approve. When
+        None, sync-mode approvals default to reject (False). This replaces the
+        old test-only ``approval_decisions`` dict on the constructor; make_service
+        injects a closure over any pre-seeded decisions.
     """
+
+    # Default bound wait for an async approval decision (seconds). A never-decided
+    # approval is treated as NOT approved after this, so a harness thread cannot
+    # hang forever. Read from config.limits.approval_timeout_sec if present.
+    _DEFAULT_APPROVAL_TIMEOUT_SEC = 3600.0
 
     def __init__(
         self,
@@ -75,14 +86,14 @@ class ApplicationService:
         config,
         harness_factory: Callable,
         sync: bool = False,
-        approval_decisions: dict | None = None,
+        sync_decision_fn: Callable[[str], bool] | None = None,
     ):
         self._db = db
         self._db_path = db_path
         self._config = config
         self._harness_factory = harness_factory
         self._sync = sync
-        self._approval_decisions: dict = approval_decisions or {}
+        self._sync_decision_fn = sync_decision_fn
 
         self._task_repo = TaskRepository(db)
         self._step_repo = StepRepository(db)
@@ -93,6 +104,15 @@ class ApplicationService:
         self._cancel_flags: dict[str, threading.Event] = {}
         # approval_id -> threading.Event (set = decision made)
         self._approval_events: dict[str, threading.Event] = {}
+        # Guards all reads/writes of _approval_events so decide() can never miss
+        # an Event that a resolver is about to (or has just) registered.
+        self._approvals_lock = threading.Lock()
+
+    def _approval_timeout_sec(self) -> float:
+        return float(
+            getattr(self._config.limits, "approval_timeout_sec", None)
+            or self._DEFAULT_APPROVAL_TIMEOUT_SEC
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -133,10 +153,17 @@ class ApplicationService:
         return self._approval_repo.list_for_task(task_id)
 
     def decide(self, approval_id: str, approved: bool) -> None:
-        """Approve or reject a pending approval and unblock any waiting harness thread."""
+        """Approve or reject a pending approval and unblock any waiting harness thread.
+
+        The DB state update and the Event lookup happen under _approvals_lock so
+        this can never race with a resolver that is mid-registration. Event.set()
+        is safe even if the resolver has not yet reached wait() -- a later wait()
+        returns immediately.
+        """
         state = "APPROVED" if approved else "REJECTED"
-        self._approval_repo.update_state(approval_id, state)
-        ev = self._approval_events.get(approval_id)
+        with self._approvals_lock:
+            self._approval_repo.update_state(approval_id, state)
+            ev = self._approval_events.get(approval_id)
         if ev is not None:
             ev.set()
 
@@ -158,14 +185,15 @@ class ApplicationService:
     # ------------------------------------------------------------------
 
     def _build_sync_approval_resolver(self, task_id: str):
-        """Sync-mode resolver: consults pre-seeded decisions dict."""
-        decisions = self._approval_decisions
+        """Sync-mode resolver: consults the injected sync_decision_fn (no blocking)."""
+        decide_fn = self._sync_decision_fn
 
         def resolver(action, verdict):
             fp = fingerprint(action)
+            step_index = self._event_repo.latest_action_step_index(task_id)
             approval_id = self._approval_repo.insert(
                 task_id=task_id,
-                step_index=0,
+                step_index=step_index,
                 action_snapshot={"tool": action.tool, "arguments": action.arguments},
                 action_fingerprint=fp,
                 governance_decision=verdict.decision.value,
@@ -173,32 +201,65 @@ class ApplicationService:
                 reason=verdict.reason,
                 risk_explanation=verdict.reason,
             )
-            # Look up per-id, then wildcard, then default False (reject)
-            approved = decisions.get(approval_id, decisions.get("*", False))
+            approved = bool(decide_fn(approval_id)) if decide_fn is not None else False
             state = "APPROVED" if approved else "REJECTED"
             self._approval_repo.update_state(approval_id, state)
             return approved
 
         return resolver
 
-    def _build_async_approval_resolver(self, task_id: str, approval_repo: ApprovalRepository):
-        """Async-mode resolver: blocks on threading.Event until decide() is called."""
+    def _build_async_approval_resolver(
+        self,
+        task_id: str,
+        approval_repo: ApprovalRepository,
+        event_repo: AuditEventRepository,
+    ):
+        """Async-mode resolver: blocks on a threading.Event until decide() is called.
+
+        Ordering matters to avoid a lost wakeup: we mint the approval_id and
+        register its Event UNDER _approvals_lock BEFORE inserting the PENDING row.
+        That way decide() -- which takes the same lock -- can never look up the id
+        and miss the Event. Event.set() before wait() is safe (wait returns at once).
+        The wait is bounded; on timeout the approval is treated as NOT approved and
+        the row is moved to a terminal REJECTED state so it never stays PENDING.
+        """
 
         def resolver(action, verdict):
             fp = fingerprint(action)
-            approval_id = approval_repo.insert(
-                task_id=task_id,
-                step_index=0,
-                action_snapshot={"tool": action.tool, "arguments": action.arguments},
-                action_fingerprint=fp,
-                governance_decision=verdict.decision.value,
-                triggered_rule_id=verdict.rule_id,
-                reason=verdict.reason,
-                risk_explanation=verdict.reason,
-            )
+            step_index = event_repo.latest_action_step_index(task_id)
+            approval_id = str(uuid.uuid4())
             ev = threading.Event()
-            self._approval_events[approval_id] = ev
-            ev.wait()  # Block until decide() sets this event
+            # Register the Event, then persist the row, all under the lock so a
+            # concurrent decide() either sees no id yet (row not inserted, so its
+            # update_state is a harmless no-op and the resolver will re-read below)
+            # or sees the Event we just registered.
+            with self._approvals_lock:
+                self._approval_events[approval_id] = ev
+                approval_repo.insert(
+                    task_id=task_id,
+                    step_index=step_index,
+                    action_snapshot={"tool": action.tool, "arguments": action.arguments},
+                    action_fingerprint=fp,
+                    governance_decision=verdict.decision.value,
+                    triggered_rule_id=verdict.rule_id,
+                    reason=verdict.reason,
+                    risk_explanation=verdict.reason,
+                    approval_id=approval_id,
+                )
+
+            decided = ev.wait(timeout=self._approval_timeout_sec())
+            if not decided:
+                # Never decided within the bound: fail closed and move the row to a
+                # terminal state so it isn't stuck PENDING.
+                approval_repo.update_state(approval_id, "REJECTED", decided_by="timeout")
+                with self._approvals_lock:
+                    self._approval_events.pop(approval_id, None)
+                return False
+
+            with self._approvals_lock:
+                self._approval_events.pop(approval_id, None)
+            # Re-read the authoritative state from the DB (a decision may have
+            # arrived via any path) and respect it.
             row = approval_repo.get(approval_id)
             return row["state"] == "APPROVED"
 
@@ -219,11 +280,14 @@ class ApplicationService:
         approval_resolver = self._build_sync_approval_resolver(task_id)
         cancel_check = cancel_event.is_set
 
+        # Sync mode runs on the calling thread, so the harness audit may safely
+        # wrap the main connection.
         harness = self._harness_factory(
             task_id=task_id,
             workspace=workspace,
             approval_resolver=approval_resolver,
             cancel_check=cancel_check,
+            audit_conn=self._db,
         )
 
         try:
@@ -243,19 +307,23 @@ class ApplicationService:
         try:
             thread_task_repo = TaskRepository(thread_conn)
             thread_approval_repo = ApprovalRepository(thread_conn)
+            thread_event_repo = AuditEventRepository(thread_conn)
 
             cancel_event = self._cancel_flags[task_id]
             cancel_check = cancel_event.is_set
 
             approval_resolver = self._build_async_approval_resolver(
-                task_id, thread_approval_repo
+                task_id, thread_approval_repo, thread_event_repo
             )
 
+            # Cross-thread sqlite is unsafe: the harness must build its AuditLog on
+            # THIS thread's connection, not the main-thread connection.
             harness = self._harness_factory(
                 task_id=task_id,
                 workspace=workspace,
                 approval_resolver=approval_resolver,
                 cancel_check=cancel_check,
+                audit_conn=thread_conn,
             )
 
             try:

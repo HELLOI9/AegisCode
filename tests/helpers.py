@@ -275,7 +275,6 @@ def make_service(
 
     db_path = str(tmp_path / "service.db")
     conn = open_db(db_path)
-    audit_log = AuditLog(conn)
 
     registry = _build_registry(spy, fail_first_test)
     dispatcher = build_dispatcher(config, registry)
@@ -286,7 +285,8 @@ def make_service(
     def final_verifier() -> bool:
         return final_ok
 
-    def harness_factory(task_id, workspace, approval_resolver=None, cancel_check=None):
+    def harness_factory(task_id, workspace, approval_resolver=None,
+                        cancel_check=None, audit_conn=None):
         import os
 
         def resolve(p: str) -> str:
@@ -301,6 +301,10 @@ def make_service(
             snapshot=lambda abspath: None,
             write_max_bytes=config.tools.write_max_bytes,
         )
+        # Build the AuditLog on the connection owned by the execution thread
+        # (audit_conn); sqlite connections are not shareable across threads.
+        audit_conn = audit_conn if audit_conn is not None else conn
+        audit_log = AuditLog(audit_conn)
         return HarnessCore(
             llm=spy_llm,
             dispatcher=dispatcher,
@@ -312,13 +316,20 @@ def make_service(
             cancel_check=cancel_check,
         )
 
+    # Convert the test-only pre-seeded decisions dict into an injected callable
+    # (id -> bool). Keeps the production constructor free of test scaffolding.
+    _decisions = approval_decisions or {}
+
+    def sync_decision_fn(approval_id: str) -> bool:
+        return _decisions.get(approval_id, _decisions.get("*", False))
+
     svc = ApplicationService(
         db=conn,
         db_path=db_path,
         config=config,
         harness_factory=harness_factory,
         sync=sync,
-        approval_decisions=approval_decisions,
+        sync_decision_fn=sync_decision_fn,
     )
 
     if pre_cancel:
