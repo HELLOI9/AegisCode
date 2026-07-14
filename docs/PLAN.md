@@ -1605,7 +1605,7 @@ git commit -m "feat: HITL approval state machine + fingerprint supersede + remem
 
 ---
 
-### Task 16: run_command executor tool (甲 layer 5, shell=False)
+### Task 16: run_command executor tool (甲 layer 5, shell=False) ✅ DONE (b64465b)
 
 **Files:**
 - Create: `aegiscode/tools/command_tool.py`, `tests/tools/test_command_tool.py`
