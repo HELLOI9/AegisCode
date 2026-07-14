@@ -11,10 +11,11 @@ plaintext credential value is never included in any API response.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from aegiscode.credentials.store import CredentialStore
@@ -188,5 +189,30 @@ def build_app(
     def credentials_status() -> dict:
         """Return CredentialStore masked status only — never the plaintext key."""
         return _cred_store.status()
+
+    # -----------------------------------------------------------------------
+    # Native WebUI (single-page, no framework/CDN/build step)
+    # -----------------------------------------------------------------------
+    # Files live next to this module in the ``webui/`` directory. Locate them
+    # relative to __file__ so serving works regardless of the current working
+    # directory. Explicit FileResponse routes (rather than a StaticFiles mount)
+    # keep the URL surface minimal and the media types explicit, so /app.js is
+    # served as JavaScript and never collides with the JSON API routes.
+    _webui_dir = Path(__file__).parent / "webui"
+
+    @app.get("/")
+    def webui_index() -> FileResponse:
+        """Serve the WebUI HTML shell."""
+        return FileResponse(_webui_dir / "index.html", media_type="text/html")
+
+    @app.get("/app.js")
+    def webui_app_js() -> FileResponse:
+        """Serve the WebUI JavaScript."""
+        return FileResponse(_webui_dir / "app.js", media_type="application/javascript")
+
+    @app.get("/style.css")
+    def webui_style_css() -> FileResponse:
+        """Serve the WebUI stylesheet."""
+        return FileResponse(_webui_dir / "style.css", media_type="text/css")
 
     return app
