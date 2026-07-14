@@ -264,7 +264,7 @@ def _cmd_demo(args) -> int:
     # (label, module, contract predicate on the returned dict)
     demos = [
         ("demo①", demo1_dangerous_denied,
-         lambda r: r == {"executed": 0, "decision": "DENY"}),
+         lambda r: r.get("executed") == 0 and r.get("decision") == "DENY"),
         ("demo②", demo2_feedback_loop,
          lambda r: r.get("completed") and r.get("action_changed")),
         ("demo③", demo3_symlink_escape,
@@ -331,8 +331,15 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv) -> int:
-    """Parse *argv* (a list, not sys.argv) and dispatch. Returns an exit code."""
+def main(argv=None) -> int:
+    """Parse *argv* (a list, not sys.argv) and dispatch. Returns an exit code.
+
+    ``argv`` defaults to ``sys.argv[1:]`` so the console-script entry point
+    (``aegiscode = aegiscode.cli:main``), which calls ``main()`` with no args,
+    works as well as ``python -m aegiscode.cli``.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.func(args)

@@ -16,7 +16,14 @@ from demos import (
 
 def test_demo1():
     # Governance intercepts `rm -rf /`: DENY and the spy tool NEVER runs.
-    assert demo1_dangerous_denied.run() == {"executed": 0, "decision": "DENY"}
+    r = demo1_dangerous_denied.run()
+    assert r["executed"] == 0
+    assert r["decision"] == "DENY"
+    # SPEC §16.4: the DENY is recorded in the audit log as a GOVERNANCE_DECISION
+    # event carrying a rule_id, and the agent receives POLICY_DENIED feedback.
+    assert r["audit_has_deny"] is True
+    assert r["deny_rule_id"]  # non-empty rule id
+    assert r["feedback_is_policy_denied"] is True
 
 
 def test_demo2():
@@ -34,6 +41,10 @@ def test_demo3():
     assert r["decision"] == "DENY"
     # No /etc/passwd content leaked back through the tool result.
     assert r["leaked"] is False
+    # SPEC §16.4: the denial is recorded in the audit log (a GOVERNANCE_DECISION
+    # event with the fence's DENY rule_id) and NO TOOL_EXECUTED event was emitted.
+    assert r["audit_has_deny"] is True
+    assert r["no_tool_executed"] is True
 
 
 def test_demo4():
