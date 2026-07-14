@@ -6,10 +6,18 @@ ALLOW = ["python","pytest","git","pip","ls","cat"]
 RULES = [
     {"argv0":"git","args_contain":["push"],"decision":"DENY"},
     {"argv0":"git","args_contain":["commit"],"decision":"REQUIRE_APPROVAL"},
+    {"argv0":"git","args_contain":["reset","--hard"],"decision":"DENY"},
     {"argv0":"pip","args_contain":["install"],"decision":"REQUIRE_APPROVAL"},
     {"argv0":"python","args_contain":["-c"],"decision":"DENY"},
     {"argv0":"python","args_contain":["-m"],"decision":"DENY"},
 ]
+
+def test_multitoken_rule_requires_all_tokens():
+    # git reset --hard has BOTH tokens -> matches the DENY rule
+    assert judge_command("git reset --hard", ALLOW, RULES).decision == Decision.DENY
+    # git reset alone has only ONE token -> must NOT match; git is allowlisted -> ALLOW
+    assert judge_command("git reset", ALLOW, RULES).decision == Decision.ALLOW
+
 
 def test_rm_denied_by_metastructure_or_allowlist():
     assert judge_command("rm -rf /", ALLOW, RULES).decision == Decision.DENY
