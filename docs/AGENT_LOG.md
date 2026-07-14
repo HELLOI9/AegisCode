@@ -415,3 +415,28 @@
 - **每次修复重跑**:定向红队测试 → 模块测试 → 全量 → 相关机制(治理复现脚本 / CI 闸 / 记忆端到端)。全量 251→264→276→283→303→311→315,逐步递增无回归。
 - **决策关口(AskUserQuestion)**:治理绕过修复深度=彻底加固;超时+脱敏正则=都修;记忆接入=先核对 PLAN/SPEC 再定(结论:SPEC §524/§537 M10 验收为单测口径已满足,但 T23 显式依赖 T21 且 §一 要求"记忆闭环",`build_context` 本已接主循环仅 `memories=[]` 硬编码 → 接入,低风险~10 行);WebUI 公网部署=先修 workspace 围栏、部署待定。
 - **并行 subagent 同 worktree**:片19(脱敏)片20(workspace)触及 disjoint 文件并行跑,控制器分两次提交(21a0ee1 / 594e32e)分离关注点;C1/C2/I1/I2 因同处 judge_command 作为一个 TDD 单元(2c92fa3)避免串行抖动同函数。
+
+### 收尾交付(§三~§十)
+
+#### make demo — 三机制确定性演示入口(已提交 355efb1)
+- **背景**:收尾前不存在 `make demo`,仅 `aegiscode demo`(CLI,4 个 §16.4 演示,dict 输出)。§三 硬性要求恰好 3 项、`[Demo N/3]` 分块 + 逐行 `PASS:` + 聚合退出码。
+- **产物**:`demos/run_demos.py`(编排器,`DemoSpec(name,index,title,run,checks)` + `_DEMO_BY_NAME` + `main(argv)` + `--only`)、`demos/demo3_approval_binding.py`(新,完整审批生命周期)、`tests/demos/test_run_demos.py`(4 测)、`tests/demos/test_demo3_approval_binding.py`(1 测)、`Makefile`(`demo`/`demo-guardrail`/`demo-feedback`/`demo-approval`,`PY ?= python`)。
+- **Demo 3 深度**:demo4_superseded 仅 fingerprint 级 `validate_resume`,不足 §3.1 要求的完整活循环生命周期。新 demo3_approval_binding 驱动真实 HarnessCore + 变异 approval_resolver(round1 原样批准→执行;round2 批准后变异 arguments→ 指纹分歧→SUPERSEDED→不执行),经真实 AuditEventRepository 读回证明六项保证(暂停时 exec=0 / 规范化快照+指纹存储 / 原动作执行 / 变异 SUPERSEDED / 变异不执行 / APPROVED→SUPERSEDED 审计流)。依赖本轮 a952e1f 审批绑定接线。
+- **TDD**:orchestrator 测先红(ImportError)→ 实现 → 4 绿;demo3 测先红(ModuleNotFound)→ 实现 → 1 绿。`make demo` 退出 0(3 passed);强制某 demo 契约失败→退出非 0(反"吞错返回成功")。全量 316→320。
+- **注**:demo① `deny_rule_id` 由 `CMD_ALLOWLIST`→`CMD_PATH_FENCE`(C3 修复的**后果**:`rm -rf /` 现先命中路径围栏,`/` 逃逸 workspace)。仍 DENY/executed=0/已审计,demo① 测断言 truthy rule_id 非特定值故不破。两个 `demo3_*` 文件不同入口共存(`make demo`→approval,`aegiscode demo`→symlink)。
+
+#### CI 加入 make demo(§七,已提交 8a02d9f)
+- `.gitlab-ci.yml` 与 `.github/workflows/ci.yml` 的 `unit-test` job 均在 `make test` 后追加 `make demo`(MockLLM,无 key,无 `|| true` 守护)。任一演示失败即 job 失败。两文件 YAML 解析校验通过,`unit-test` job 名精确保留。
+
+#### 凭据安全审计(§六,已完成)— PASS,0 Critical / 0 Important
+- subagent 只读审计 12 面(源码/配置/git 历史/.env/fixture/日志/审计链/WebUI/API/Dockerfile/构建 arg+镜像 env/错误栈)。
+- **全生命周期经验验证**:未配置(`configured:False`)→ getpass 安全录入 + 文件 0600 → status 仅掩码(first3…last4,<8→`***`,明文不现)→ 更新覆盖 → clear(`configured:False`)→ 清除后 `build_llm` 抛 `NoKeyError` 不触网。
+- **redact-before-hash 确认**:`chain.py:17` 在 SHA256 与 DB insert **之前** redact。
+- **git 历史**:141 commit 仅规范假密钥(`AKIAIOSFODNN7EXAMPLE` 为 AWS 官方文档示例,其余显式占位),全在 tests/ 或 docs/PLAN.md 代码片段。`ci_secret_scan` 发行面 0 findings。
+- **Minor(记录未阻塞)**:scanner 有意限于 `sk-`/`AKIA`/`KEY=` 形态,不含 `sk-` 前缀的第三方 key 会漏——对本应用威胁模型(自身 OpenAI/Anthropic key)可接受,非通用密钥探测器。
+
+#### 干净环境验证(§五,已完成)— 全绿 + 挖出 1 真实 bug
+- **命令与退出码**:`make test` → 321 passed;`make demo` → exit 0(3 passed);`docker build -t aegiscode:m8 .` → 成功(clean `pip install` 解析到 starlette-1.3.1,证可移植性修复在全新环境成立);`docker run` → 容器 running,退出 status 0 无残留进程。
+- **挖出真实 bug(已修 1fc6ea4)**:§五 clean-env 测试暴露 `_load_config` 无配置文件时**直接返回 `AegisConfig()`,绕过 `load_config` → `AEGIS_LLM_PROVIDER` 环境覆盖被静默忽略**。容器内无 aegis.yaml,故 `serve` 恒用 `provider=openai`,`-e AEGIS_LLM_PROVIDER=mock` 无效 → MockLLM 模式无法起服务(破 §五/§八)。TDD 修:loader 抽出 `_apply_env_overrides` 单一真源 + `load_defaults(env)`,无文件路径也应用覆盖;红(openai≠mock)→ 绿。321 passed。
+- **容器内经验验证(修复后重建镜像)**:`-e AEGIS_LLM_PROVIDER=mock` 无 key 起服务成功;`GET /`=200 + 标题 + app.js/style.css 加载;`/credentials/status`=`{"configured":false,"masked":null}`(无明文);workspace 围栏在容器内生效(`POST /tasks` 越界 `/tmp/acc`→400,in-base→200);镜像 `GPG_KEY` 与 stock `python:3.12-slim` 逐字节相同(Python 发行签名公钥,非本项目密钥);容器 clean exit(0)无 stray 进程。
+- **`GET /tasks` 405**:设计如此(无 collection-GET 路由,任务经 `GET /tasks/{id}` 读),非缺陷。
