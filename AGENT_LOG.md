@@ -127,3 +127,25 @@
 - 延后 Minor:T16 char/byte 截断(良性)、T17 arguments 忽略注释、readonly_tools 未被 dispatcher 消费(factory 统一)、ApprovalRequest 缺 §11.4 部分字段(TaskState 落地时补)、dispatcher/tool 两条路径解析需 M4 保证一致。
 - **人工干预**:控制器当场修乙绕过(安全核心、fail-safe、单文件);其余按评审 defer 并记为 M4 硬性条件。
 - 下一步:PR + merge;之后 Milestone 3(反馈/审计/记忆)。
+
+---
+
+## 2026-07-14 · Milestone 3(反馈/审计/记忆)— 新 worktree
+**Worktree**:`.claude/worktrees/m3-feedback-audit-memory`,分支同名(base = main @ e143d34,M0+M1+M2 已并入)。基线 make test = 94。
+**顺序**(依赖正确):T25 secret scanner(先做,解锁 T20)→ T18 反馈分类 → T19 审计哈希链 → T20 记忆存储 → T21 上下文构建。实现/评审 sonnet(1 处 haiku 微改),最终评审 opus。
+
+### 逐任务(细节见 progress.md 账本)
+- T25 secret scanner b39c3ca +f271fd7(修 open() 句柄泄漏)。复用 redactor 的 4 类 key 模式。
+- T18 反馈分类+pytest摘要+ProgressTracker c0df597 +422f0f8(修返回注解 + 硬限摘要行数)。8 类失败分类;deque(maxlen=3) 无进展窗口。
+- T19 审计 SHA256 哈希链 af405cf +8c36acb(修 utcnow 弃用) +7f1477d(显式 commit 保证持久 + 补 hash篡改/删除 篡改类测试)。GENESIS 0*64,payload 写前脱敏,verify_chain 返回篡改 step。
+- T20 记忆存储 738ad8a +ce70499(补跨项目隔离测试)。写前 scan_text 拒绝密钥;source=agent→confirmed=False + is_governance_usable=False;参数化 SQL 无注入。
+- T21 上下文构建 932e893 +b633118(修 tier 4/5 顺序 feedback 先于 memories)。确定性 summarize、零 LLM、system 永不丢弃。
+
+### 全分支最终评审(Milestone 3,opus)— CHANGES REQUIRED → 已解决(e529ea8)
+- **阻断**:retrieve 缺 type 过滤(SPEC §M10/§14 验收明列 type+project+keyword+topK)。已补可选 type 参数 + AND type=?。
+- **Important**:审计尾部截断不可检测(删末尾行留下合法前缀,verify_chain 仍报 intact)。已加 verify_chain(expected_count) 计数锚点 + 文档说明(完整签名按 §M8 延后)。
+- **安全**:记忆 write 现对 value+key+tags 都 scan_text(key 在检索面上)。
+- e529ea8 修全部三项 +3 测试,119 passed 且 -W error::DeprecationWarning 纯净。
+- **跟踪(非阻断,带入后续)**:scanner(T25)与 redactor(M0)重复维护 key 模式列表(今日完全一致,应合并单一源防漂移);is_governance_usable 仅咨询性,M4 主循环须逐行调用;classify 测试仅覆盖 8 类中 2 类(M4 接线时补)。
+- **人工干预**:控制器判定 type 过滤为阻断(书面验收未达)、尾部截断锚点与 key/tags 扫描当场折进一个修复提交;pattern-drift 合并 defer。
+- 下一步:PR + merge;之后 Milestone 4(主循环 T22 停机 + T23 HarnessCore,含 M2 遗留的治理 factory 装配硬性条件)。

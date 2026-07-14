@@ -2051,7 +2051,7 @@ git commit -m "feat: memory store (secret-refusing write, filtered retrieval, ag
 
 ---
 
-### Task 21: Context builder (6-tier budget + deterministic summarize) ✅ DONE (932e893, +b633118)
+### Task 21: Context builder (6-tier budget + deterministic summarize) ✅ DONE (932e893, +b633118); M3 final-review fixes in e529ea8
 
 **Files:**
 - Create: `aegiscode/memory/context_builder.py`, `tests/memory/test_context_builder.py`
