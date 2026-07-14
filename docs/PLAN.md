@@ -2550,7 +2550,7 @@ git commit -m "feat: ApplicationService + repositories (create/query/approve/aud
 
 ---
 
-### Task 27: FastAPI REST (8 endpoints)
+### Task 27: FastAPI REST (8 endpoints) ✅ DONE (b622087, +2781e8a)
 
 **Files:**
 - Create: `aegiscode/service/api.py`, `tests/service/test_api.py`

@@ -239,3 +239,12 @@
   - ce96821 合修四项 + 2 async 测试(pause/resume 跨线程 + decide-before-wait 仍唤醒),async 测试 5s 硬上限轮询跑 5 次零 flaky。
 - **人工干预**:控制器判定 async 路径 bug 虽 M6 测试不触发但 T27 API 会以 async 驱动,升级为 must-fix(而非 defer);要求补真实跨线程 pause/resume 测试并加硬超时防 CI 挂起。
 - **安全**:参数化 SQL;后台线程各开自己的 DB 连接。
+
+### Task 27 · FastAPI REST(8 端点)— ✅ 完成 (b622087, +2781e8a)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet。
+- **TDD**:RED = api.py 不存在,21 测试全红;GREEN = 实现后 21/21 绿,203 total。polish 后 22 测试、204 total、ruff 干净、全离线(MockLLM + tmp sqlite,`sync=True`)。
+- **产物**:`aegiscode/service/api.py` — `build_app(service, credential_store=None) -> FastAPI`,8 端点(SPEC §13 M13):POST /tasks · GET /tasks/{id} · GET /tasks/{id}/events?since=N · GET /tasks/{id}/approvals · POST /approvals/{id}/decision · POST /tasks/{id}/cancel · GET /tasks/{id}/audit · GET /credentials/status。未知 task 走 HTTPException 404;decide/cancel 对未知 id 返回 200 no-op(与 ApplicationService 语义一致)。`tests/helpers.py` 加 `make_api_client`(TestClient over build_app,sync=True service),供 T28 复用。
+- **安全**:API 无鉴权、仅 localhost — 模块 docstring 明确警告不得暴露到公网。`/credentials/status` 仅回显 masked,永不明文(专门的明文泄漏测试)。全局 `@app.exception_handler(Exception)` → 通用 500 `{"detail":"internal error"}`,服务端记日志,响应体不泄漏 traceback/db 路径/config(注入 `sqlite3.OperationalError("SECRET_DB_PATH=...")` 的真实泄漏测试断言无 `Traceback`/`OperationalError`/`SECRET_DB_PATH`)。
+- **polish(2781e8a)**:db.py 加 `check_same_thread=False` 的 doc 注释(Starlette 线程池路由同步端点必需;WAL+autocommit + 后台线程各开自己连接,单用户 localhost 下安全);清理 credential-leak 测试残留的复制粘贴断言;移除未用 `import pytest`。确认 pyproject filterwarnings 路径 `starlette.exceptions.StarletteDeprecationWarning` 为正规模块(`__module__` 实测),且该类非 `DeprecationWarning` 子类,`error::DeprecationWarning` 本不会升级它。
+- **两阶段评审**:Stage1 SPEC 合规 ✅(8 端点齐全、masked-only、404 语义、错误不泄漏、离线确定性);Stage2 质量 — 0 Critical / 0 Important。Minor:默认 null-store 在真实 env key 存在时仍报 configured=False(fail-safe,不泄漏,建议 T28 入口注入真实 store);cancel/decide 端点测试薄但诚实(sync 下任务已完成,真实行为由服务层测试覆盖);report 计数漂移 21→22。均不阻塞。
+- **人工干预**:控制器补跑正式两阶段评审(前次仅有 report 无 review),确认 filterwarnings 路径实为正确(推翻上下文中"路径错误"的假设);移除未用 import 使 ruff 干净。
