@@ -19,6 +19,9 @@ def scan_text(text, path="<text>"):
 def scan_paths(paths):
     out = []
     for p in paths:
-        try: out += scan_text(open(p, encoding="utf-8", errors="ignore").read(), p)
-        except OSError: continue
+        try:
+            with open(p, encoding="utf-8", errors="ignore") as fh:
+                out += scan_text(fh.read(), p)
+        except OSError:
+            continue
     return out
