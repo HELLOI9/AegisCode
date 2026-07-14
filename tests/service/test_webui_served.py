@@ -47,6 +47,22 @@ def test_app_js_served_with_polling_logic(tmp_path):
     assert "/audit" in body
 
 
+def test_app_js_renders_changed_files_diff(tmp_path):
+    """app.js must wire its diff panel to payload.changed_files (the field the
+    harness now emits on TOOL_EXECUTED) rather than nonexistent diff fields, and
+    must render paths via textContent (no unescaped innerHTML) since workspace
+    paths are attacker-influenced."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    r = client.get("/app.js")
+    assert r.status_code == 200
+    body = r.text
+    assert "changed_files" in body
+    # XSS-safety: the diff panel must NOT interpolate a path into innerHTML.
+    # (Existing innerHTML uses only clear lists to "".) Paths flow through
+    # el()/textContent instead.
+    assert "innerHTML" not in body.split("changed_files")[1]
+
+
 def test_style_css_served(tmp_path):
     """style.css must be served with 200 and be a non-empty stylesheet."""
     client = make_api_client(tmp_path, scripted=[], final_ok=True)

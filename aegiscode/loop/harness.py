@@ -182,9 +182,18 @@ class HarnessCore:
                 # At this point result is not None (ALLOW/ALLOW_WITH_AUDIT produce one)
                 assert result is not None  # REQUIRE_APPROVAL without approval was handled above
 
+                # Surface which files the tool touched so the WebUI diff panel
+                # (SPEC §13, mandatory) has data. Additive + backward-compatible:
+                # only present when the result actually carries changed files, so
+                # non-writing tools (run_tests/finish) don't gain a noisy key.
+                # Full textual snapshot diffs remain deferred to v2 (SPEC line 113).
+                tool_payload = {"tool": action.tool, "status": result.status}
+                changed_files = result.artifacts.get("changed_files")
+                if changed_files:
+                    tool_payload["changed_files"] = changed_files
                 self.audit.append(
                     self.ctx.task_id, c.step, EventType.TOOL_EXECUTED,
-                    {"tool": action.tool, "status": result.status},
+                    tool_payload,
                 )
 
                 # ---- finish tool ----

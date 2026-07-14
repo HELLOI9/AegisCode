@@ -74,20 +74,18 @@
   }
 
   function renderDiff(container, payload) {
-    // Show a file diff if the event payload carries one.
-    const diffText = payload.diff || payload.file_diff || null;
-    if (!diffText) return;
+    // Show the file-change ("diff") panel when the harness reports which files
+    // a tool touched. The harness emits payload.changed_files on TOOL_EXECUTED
+    // events (SPEC §13 mandatory diff view; textual snapshot diffs are v2).
+    const changed = payload.changed_files;
+    if (!Array.isArray(changed) || changed.length === 0) return;
     const box = el("div", "diff");
-    const path = payload.path || payload.file || payload.file_path;
-    if (path) box.appendChild(el("div", "step", path));
-    String(diffText)
-      .split("\n")
-      .forEach((line) => {
-        let cls = "";
-        if (line.startsWith("+")) cls = "add";
-        else if (line.startsWith("-")) cls = "del";
-        box.appendChild(el("div", cls, line));
-      });
+    box.appendChild(el("div", "step", "changed files (" + changed.length + ")"));
+    changed.forEach((path) => {
+      // CRITICAL: workspace paths are attacker-influenced. el() sets the value
+      // via textContent, so paths are never interpreted as HTML.
+      box.appendChild(el("div", "add", String(path)));
+    });
     container.appendChild(box);
   }
 
