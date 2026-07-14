@@ -61,6 +61,50 @@ def test_scan_gate_is_not_vacuous():
     assert findings
 
 
+def test_scan_gate_fails_on_planted_key_through_full_path(tmp_path, monkeypatch):
+    """Exercise the REAL gate path (rglob walk + allowlist filter + exit code),
+    not just the underlying regex. Point REPO_ROOT at a temp tree with a planted
+    key under a shipped dir and assert main() returns 1 and names the file.
+
+    This is the anti-theater proof the committed suite must carry: it fails if
+    shipped_py_files()/remaining_findings()/main() were broken, whereas a bare
+    scan_text() assertion would not.
+    """
+    mod = _load_scan_module()
+    (tmp_path / "aegiscode").mkdir()
+    leak = tmp_path / "aegiscode" / "_planted_leak.py"
+    leak.write_text("SECRET_KEY = 'sk-abcdef1234567890abcdef1234567890'\n")
+    monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
+
+    remaining = mod.remaining_findings()
+    assert remaining, "gate must detect the planted key on the shipped surface"
+    assert any("_planted_leak.py" in str(f.path) for f in remaining)
+    assert mod.main([]) == 1
+
+
+def test_scan_gate_allowlist_suppresses_only_pinned_line(tmp_path, monkeypatch):
+    """The allowlist must be line-pinned: a matching finding on the exact
+    (path_suffix, line_no) is suppressed, but the SAME pattern on any other
+    line is NOT — so the allowlist can't silently hide a real leak elsewhere.
+    """
+    mod = _load_scan_module()
+    pkg = tmp_path / "aegiscode" / "service"
+    pkg.mkdir(parents=True)
+    # Line 1 = a benign identifier-triggered FP we allowlist; line 2 = real key.
+    (pkg / "assembly.py").write_text(
+        "key = credential_store.get_key()\n"
+        "SECRET_KEY = 'sk-abcdef1234567890abcdef1234567890'\n"
+    )
+    monkeypatch.setattr(mod, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "ALLOWLIST", [("aegiscode/service/assembly.py", 1)])
+
+    remaining = mod.remaining_findings()
+    # The line-1 FP is suppressed; the line-2 real key must survive.
+    assert remaining, "real key on a non-allowlisted line must not be suppressed"
+    assert all(f.line_no != 1 for f in remaining)
+    assert any(f.line_no == 2 for f in remaining)
+
+
 def test_scan_main_returns_zero_on_clean_tree():
     mod = _load_scan_module()
     assert mod.main([]) == 0
