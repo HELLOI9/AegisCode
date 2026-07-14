@@ -36,3 +36,10 @@ def test_traversal_to_sibling_prefix_denied(tmp_path):
     (tmp_path / "ws-backup").mkdir()
     (tmp_path / "ws-backup" / "s.txt").write_text("x")
     assert check_path("../ws-backup/s.txt", str(root), []).allowed is False
+
+def test_symlink_to_sensitive_file_inside_workspace_denied(tmp_path):
+    root = tmp_path / "ws"; root.mkdir()
+    (root / ".env").write_text("SECRET=1")
+    (root / "report.txt").symlink_to(root / ".env")   # innocuous name -> sensitive target, both in workspace
+    # ownership passes (target is inside ws) but it resolves to .env -> must be DENIED by sensitive check
+    assert check_path("report.txt", str(root), [".env", "*.pem", "*.key"]).allowed is False

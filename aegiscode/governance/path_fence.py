@@ -8,6 +8,16 @@ class PathVerdict(NamedTuple):
     reason: str
 
 
+def _matches_sensitive(p, patterns):
+    """Return True if path p matches any pattern in the sensitive list."""
+    base = os.path.basename(p)
+    segs = p.split(os.sep)
+    for pat in patterns:
+        if fnmatch.fnmatch(base, pat) or pat.rstrip("/") in segs:
+            return True
+    return False
+
+
 def check_path(path, workspace_root, sensitive_patterns) -> PathVerdict:
     if not path or not isinstance(path, str):
         return PathVerdict(False, "empty or non-string path")
@@ -22,8 +32,17 @@ def check_path(path, workspace_root, sensitive_patterns) -> PathVerdict:
         real = os.path.join(parent, os.path.basename(joined))
     if os.path.commonpath([os.path.realpath(real), root]) != root:
         return PathVerdict(False, "path escapes workspace (traversal/symlink)")
-    base = os.path.basename(path)
-    for pat in sensitive_patterns:
-        if fnmatch.fnmatch(base, pat) or pat.rstrip("/") in path.split(os.sep):
-            return PathVerdict(False, f"sensitive file blocked: {pat}")
+    # Check sensitive patterns on both the original input path AND the resolved
+    # real path — an in-workspace symlink with an innocuous name pointing to a
+    # sensitive file (e.g. report.txt -> .env) must be denied on the resolved path.
+    if _matches_sensitive(path, sensitive_patterns) or _matches_sensitive(real, sensitive_patterns):
+        # Find which pattern triggered for the error message
+        base = os.path.basename(path)
+        segs = path.split(os.sep)
+        rbase = os.path.basename(real)
+        rsegs = real.split(os.sep)
+        for pat in sensitive_patterns:
+            if (fnmatch.fnmatch(base, pat) or pat.rstrip("/") in segs
+                    or fnmatch.fnmatch(rbase, pat) or pat.rstrip("/") in rsegs):
+                return PathVerdict(False, f"sensitive file blocked: {pat}")
     return PathVerdict(True, "ok")
