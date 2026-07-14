@@ -2,6 +2,7 @@
 import fnmatch
 import os
 
+from aegiscode.governance.approval import SupersededError, validate_resume
 from aegiscode.governance.command_lexer import lex_command
 from aegiscode.governance.decision import Decision
 from aegiscode.governance.engine import GovernanceVerdict
@@ -154,12 +155,32 @@ class Dispatcher:
         # ALLOW or ALLOW_WITH_AUDIT — execute.
         return (verdict, tool.run(action.arguments, ctx))
 
-    def execute_approved(self, action, ctx):
+    def execute_approved(self, action, ctx, approved_fp=None):
         """Bypass the governance gate and directly execute an already-approved action.
 
         Used after REQUIRE_APPROVAL has been resolved in favour of approval.
         Returns ToolResult from the tool's run method.
+
+        approval binding: when *approved_fp* is supplied it is the fingerprint of
+        the action at the moment approval was granted. If the action about to run
+        no longer matches it (tool name / path / any argument changed), the old
+        approval is SUPERSEDED — the modified action MUST NOT execute. We reuse
+        approval.validate_resume/SupersededError (the canonical mechanism) and
+        fail closed with a denied ToolResult flagged artifacts["superseded"]=True
+        so the caller can re-evaluate the changed action instead of running it.
         """
+        if approved_fp is not None:
+            try:
+                validate_resume(approved_fp, action)
+            except SupersededError as exc:
+                return ToolResult(
+                    tool=action.tool,
+                    status="denied",
+                    category="POLICY_DENIED",
+                    summary=f"SUPERSEDED: {exc}",
+                    artifacts={"superseded": True},
+                )
+
         tool = self.registry.get(action.tool)
         if tool is None:
             return ToolResult(

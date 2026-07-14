@@ -130,13 +130,47 @@ class HarnessCore:
 
                 # ---- handle REQUIRE_APPROVAL ----
                 if verdict.decision == Decision.REQUIRE_APPROVAL:
+                    # Bind the approval to the action's fingerprint at the moment
+                    # approval is requested. If the action that reaches execution
+                    # differs (tool/path/any argument), the approval is SUPERSEDED
+                    # and the modified action must NOT run (fail closed) — it is
+                    # re-judged on a later turn instead of silently passing.
+                    approved_fp = fingerprint(action)
                     if self.approval_resolver is not None:
                         approved = self.approval_resolver(action, verdict)
                     else:
                         approved = False
 
                     if approved:
-                        result = self.dispatcher.execute_approved(action, self.ctx)
+                        result = self.dispatcher.execute_approved(
+                            action, self.ctx, approved_fp=approved_fp
+                        )
+                        if result.artifacts.get("superseded"):
+                            # Approval no longer authorizes this (changed) action.
+                            # Emit an audit event for the invalidation, feed it back
+                            # as a failure, and continue so the modified action is
+                            # re-evaluated by governance rather than executed.
+                            self.audit.append(
+                                self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
+                                {"tool": action.tool, "state": "SUPERSEDED",
+                                 "detail": result.summary},
+                            )
+                            last_feedback = self._format_feedback("POLICY_DENIED", result)
+                            self.audit.append(
+                                self.ctx.task_id, c.step, EventType.FEEDBACK,
+                                {"category": "POLICY_DENIED", "detail": last_feedback},
+                            )
+                            c = LoopCounters(
+                                step=c.step + 1,
+                                consecutive_failures=c.consecutive_failures + 1,
+                                invalid_actions=c.invalid_actions,
+                                no_progress_hits=c.no_progress_hits,
+                            )
+                            recent_steps = self._append_step(
+                                recent_steps, action, verdict, "POLICY_DENIED",
+                                result.summary, limits,
+                            )
+                            continue
                         self.audit.append(
                             self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
                             {"tool": action.tool, "state": "APPROVED"},
