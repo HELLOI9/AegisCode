@@ -1,9 +1,12 @@
 import re
 from dataclasses import dataclass
 
-_PATTERNS = [re.compile(p) for p in [
-    r"sk-ant-[A-Za-z0-9\-_]{20,}", r"sk-[A-Za-z0-9]{20,}",
-    r"AKIA[0-9A-Z]{16}", r"(?i)(KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[A-Za-z0-9\-_+/=]{16,}"]]
+# Single source of truth: reuse the redactor's credential patterns so the CI
+# secret-scan gate and the log/hash-chain redactor can never drift apart.
+# (No import cycle: aegiscode.security.redactor imports only `re`.)
+from aegiscode.security.redactor import KEY_PATTERNS
+
+_PATTERNS = [re.compile(p) for p in KEY_PATTERNS]
 
 @dataclass
 class Finding:

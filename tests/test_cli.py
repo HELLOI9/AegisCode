@@ -215,3 +215,25 @@ def test_main_no_args_reads_sys_argv(monkeypatch, tmp_path, capsys):
     assert rc == 0
     out = capsys.readouterr().out.lower()
     assert "not configured" in out or "configured: false" in out
+
+
+# --------------------------------------------------------------------------
+# _load_config env override with NO config file (clean-env / container path).
+# Regression: `serve` in a container has no aegis.yaml, so _load_config must
+# still honor AEGIS_LLM_PROVIDER=mock (else it defaults to openai and refuses
+# to serve with no key — breaking MockLLM-mode serve, acceptance §五/§八).
+# --------------------------------------------------------------------------
+
+
+def test_load_config_applies_env_override_without_config_file(tmp_path, monkeypatch):
+    from aegiscode.cli import _load_config
+
+    # A working dir with NO aegis.yaml (the container/clean-env situation).
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AEGIS_LLM_PROVIDER", "mock")
+
+    cfg = _load_config(None)
+
+    assert cfg.llm.provider == "mock", (
+        "AEGIS_LLM_PROVIDER must apply even when no aegis.yaml exists"
+    )

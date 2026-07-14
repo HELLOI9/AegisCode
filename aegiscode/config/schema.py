@@ -20,6 +20,10 @@ class Limits(_Strict):
     action_retry_limit: int = 3
     llm_max_retries: int = 3
     command_timeout_sec: int = 30
+    # Wall-clock bound on a whole run() loop (acceptance §一 "timeout" stop
+    # condition). Large default so offline MockLLM runs (millisecond-scale) never
+    # trip it — this guards real-provider runs where a call could otherwise hang.
+    wall_clock_timeout_sec: int = 300
     output_max_bytes: int = 65536
 
 
@@ -52,8 +56,10 @@ _DEFAULT_COMMAND_RULES: list["CommandRule"] = [
 
 class Governance(_Strict):
     command_allowlist: list[str] = [
-        "python", "python3", "pip", "pytest", "ruff", "mypy", "git", "ls", "cat"
-    ]
+        "python", "python3", "pip", "pytest", "ruff", "mypy", "git"
+    ]  # NOTE: `cat`/`ls` deliberately excluded — fenced read_file/list_files
+    # cover those jobs. A general file reader in the command allowlist can take
+    # an arbitrary path arg and sidestep the sensitive-file fence (defect C3).
     command_rules: list[CommandRule] = Field(
         default_factory=lambda: list(_DEFAULT_COMMAND_RULES)
     )  # baked-in; YAML fully overrides
@@ -64,6 +70,14 @@ class Governance(_Strict):
 
 class Workspace(_Strict):
     root: str = "/workspace"
+    # Server-side "allowed workspace base": a caller-supplied workspace (POST
+    # /tasks) is accepted ONLY if it is this directory or a subdirectory of it
+    # (realpath + commonpath, symlink-safe). None means "derive from root", so
+    # by default the allowed base IS `root`. This is defense-in-depth on top of
+    # the localhost-only API posture: it stops a caller from setting
+    # workspace="/" and turning the path fence's own anchor into arbitrary host
+    # write/exec (acceptance §八).
+    allowed_base: str | None = None
 
 
 class Tools(_Strict):

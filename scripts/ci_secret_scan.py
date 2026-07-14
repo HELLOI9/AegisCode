@@ -8,7 +8,7 @@ regexes used for redaction. Tests (``tests/``) and repo-root docs are out of
 scope: they intentionally contain fake keys for the scanner's own unit tests.
 
 A small, explicit ALLOWLIST carries known false positives. Today it holds a
-single entry: ``aegiscode/service/assembly.py:43``, where the line
+single entry: ``aegiscode/service/assembly.py:44``, where the line
 ``key = credential_store.get_key()`` trips the ``(?i)(KEY|...)=<16+ chars>``
 pattern on the *identifier* ``credential_store`` -- not a real secret.
 
@@ -38,7 +38,7 @@ ALLOWLIST: list[tuple[str, int]] = [
     # `key = credential_store.get_key()` -- the KEY=... regex matches the
     # 16-char identifier `credential_store`, not a secret. Verified by reading
     # aegiscode/service/assembly.py.
-    ("aegiscode/service/assembly.py", 43),
+    ("aegiscode/service/assembly.py", 44),
 ]
 
 

@@ -18,8 +18,10 @@ def test_no_progress():
 def test_invalid_action_limit():
     assert decide_termination(LoopCounters(3,0,3,0), LIM) == TerminationReason.INVALID_ACTION_LIMIT
 
-def test_nine_reasons_defined():
-    assert len(list(TerminationReason)) == 9
+def test_reasons_defined():
+    # 10 reasons: added TIMEOUT (wall-clock stop condition, acceptance §一).
+    assert len(list(TerminationReason)) == 10
+    assert TerminationReason.TIMEOUT in list(TerminationReason)
 
 def test_priority_invalid_action_wins_over_max_steps():
     # both max_steps and action_retry_limit breached simultaneously

@@ -1,5 +1,26 @@
-from aegiscode.llm.openai_adapter import OpenAIAdapter
+import aegiscode.llm.openai_adapter as oa
+from aegiscode.llm.openai_adapter import OpenAIAdapter, _real_post, HTTP_TIMEOUT_SEC
 from aegiscode.llm.anthropic_adapter import AnthropicAdapter
+
+
+def test_real_post_passes_timeout_to_urlopen(monkeypatch):
+    # A hung connection must not block forever: _real_post must pass an explicit
+    # bounded timeout= to urllib urlopen. Monkeypatch urlopen — NO real network.
+    seen = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"ok": true}'
+
+    def fake_urlopen(req, *args, **kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        return _Resp()
+
+    monkeypatch.setattr(oa.urllib.request, "urlopen", fake_urlopen)
+    _real_post("https://x/y", {}, {"a": 1})
+    assert seen["timeout"] == HTTP_TIMEOUT_SEC
+    assert isinstance(HTTP_TIMEOUT_SEC, (int, float)) and HTTP_TIMEOUT_SEC > 0
 
 def fake_openai_post(url, headers, json):
     return {"choices":[{"message":{"content":"OK-OAI"}}]}

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import uuid
 from typing import Callable
@@ -36,6 +37,43 @@ from aegiscode.persistence.repositories import (
     StepRepository,
     TaskRepository,
 )
+
+
+class WorkspaceNotAllowedError(ValueError):
+    """Raised when a requested workspace is outside the configured allowed base.
+
+    A ValueError subclass so any generic ``except ValueError`` still catches it,
+    while the API layer can map this specific type to HTTP 400 (bad request) —
+    the request is well-formed but the workspace is not permitted.
+    """
+
+
+def _validate_workspace(workspace: str, allowed_base: str) -> None:
+    """Fail closed unless *workspace* is the allowed base or a subdir of it.
+
+    Symlink-safe: both sides are resolved with os.path.realpath, so a symlink
+    inside the base that points outside (or a traversal) resolves to its real
+    target before the containment check.
+
+    Prefix-collision-safe: containment is decided by os.path.commonpath (path
+    segments), NOT string prefix — so base '/x/ws' does NOT accept '/x/ws-evil'.
+    """
+    if not workspace or not isinstance(workspace, str):
+        raise WorkspaceNotAllowedError("workspace must be a non-empty string")
+
+    base_real = os.path.realpath(allowed_base)
+    ws_real = os.path.realpath(workspace)
+    try:
+        # commonpath raises ValueError for mixed absolute/relative or different
+        # drives; either way the workspace is not safely inside the base.
+        if os.path.commonpath([ws_real, base_real]) != base_real:
+            raise WorkspaceNotAllowedError(
+                f"workspace {workspace!r} is outside the allowed base"
+            )
+    except ValueError as exc:
+        raise WorkspaceNotAllowedError(
+            f"workspace {workspace!r} is outside the allowed base"
+        ) from exc
 
 
 def _workspace_hash(workspace: str) -> str:
@@ -118,8 +156,25 @@ class ApplicationService:
     # Public API
     # ------------------------------------------------------------------
 
+    def _allowed_base(self) -> str:
+        """The server-side allowed workspace base.
+
+        Policy: config.workspace.allowed_base if set, else config.workspace.root.
+        Validated in create_task so BOTH the API and any other caller of
+        create_task are protected — the check cannot be bypassed at the boundary.
+        """
+        ws = self._config.workspace
+        return ws.allowed_base or ws.root
+
     def create_task(self, workspace: str, description: str, pre_cancel: bool = False) -> str:
-        """Create a task and run it (sync inline or async background thread)."""
+        """Create a task and run it (sync inline or async background thread).
+
+        The requested workspace is validated against the server-side allowed base
+        FIRST — before any task row is inserted — so a rejected request creates no
+        task and touches no host path (acceptance §八).
+        """
+        _validate_workspace(workspace, self._allowed_base())
+
         task_id = self._task_repo.insert(workspace, _workspace_hash(workspace), description)
 
         cancel_event = threading.Event()

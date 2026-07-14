@@ -7,6 +7,8 @@ No external agent SDK or framework — just a plain Python while-loop composing:
 """
 from __future__ import annotations
 
+import time
+
 from aegiscode.protocol.parser import parse_action, ActionParseError
 from aegiscode.governance.decision import Decision
 from aegiscode.feedback.classifier import classify, ProgressTracker
@@ -29,6 +31,8 @@ class HarnessCore:
         final_verifier,
         approval_resolver=None,
         cancel_check=None,
+        memory_store=None,
+        project_id=None,
     ):
         self.llm = llm
         self.dispatcher = dispatcher
@@ -37,6 +41,13 @@ class HarnessCore:
         self.ctx = ctx
         self.final_verifier = final_verifier
         self.approval_resolver = approval_resolver
+        # Optional memory read-path. When memory_store is provided (with a
+        # project_id scope), _build retrieves project memories and feeds the
+        # governance-usable ones into the MEMORY tier of build_context. Default
+        # None keeps every existing HarnessCore(...) construction working with
+        # an empty MEMORY tier (back-compat).
+        self.memory_store = memory_store
+        self.project_id = project_id
         # Optional cooperative-cancellation hook: () -> bool. When it returns
         # True at the top of a turn, the loop stops with CANCELLED. This is the
         # seam T26 ApplicationService uses to cancel a running task.
@@ -56,10 +67,16 @@ class HarnessCore:
         recent_steps: list[dict] = []
         tracker = ProgressTracker(window=self.config.limits.no_progress_repeat_limit)
         limits = self.config.limits.model_dump()
+        # Monotonic start for the wall-clock timeout stop condition. Checked
+        # each turn BEFORE any LLM call / tool dispatch so a hung run fails
+        # closed (no further actions execute). Uses time.monotonic (immune to
+        # clock adjustments); tests monkeypatch this module's `time.monotonic`.
+        start = time.monotonic()
 
         while True:
-            # ---- pre-step termination check ----
-            reason = decide_termination(c, limits)
+            # ---- pre-step termination check (incl. wall-clock timeout) ----
+            elapsed_sec = time.monotonic() - start
+            reason = decide_termination(c, limits, elapsed_sec=elapsed_sec)
             if reason is not None:
                 self._audit_term(c, reason)
                 return reason
@@ -130,13 +147,47 @@ class HarnessCore:
 
                 # ---- handle REQUIRE_APPROVAL ----
                 if verdict.decision == Decision.REQUIRE_APPROVAL:
+                    # Bind the approval to the action's fingerprint at the moment
+                    # approval is requested. If the action that reaches execution
+                    # differs (tool/path/any argument), the approval is SUPERSEDED
+                    # and the modified action must NOT run (fail closed) — it is
+                    # re-judged on a later turn instead of silently passing.
+                    approved_fp = fingerprint(action)
                     if self.approval_resolver is not None:
                         approved = self.approval_resolver(action, verdict)
                     else:
                         approved = False
 
                     if approved:
-                        result = self.dispatcher.execute_approved(action, self.ctx)
+                        result = self.dispatcher.execute_approved(
+                            action, self.ctx, approved_fp=approved_fp
+                        )
+                        if result.artifacts.get("superseded"):
+                            # Approval no longer authorizes this (changed) action.
+                            # Emit an audit event for the invalidation, feed it back
+                            # as a failure, and continue so the modified action is
+                            # re-evaluated by governance rather than executed.
+                            self.audit.append(
+                                self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
+                                {"tool": action.tool, "state": "SUPERSEDED",
+                                 "detail": result.summary},
+                            )
+                            last_feedback = self._format_feedback("POLICY_DENIED", result)
+                            self.audit.append(
+                                self.ctx.task_id, c.step, EventType.FEEDBACK,
+                                {"category": "POLICY_DENIED", "detail": last_feedback},
+                            )
+                            c = LoopCounters(
+                                step=c.step + 1,
+                                consecutive_failures=c.consecutive_failures + 1,
+                                invalid_actions=c.invalid_actions,
+                                no_progress_hits=c.no_progress_hits,
+                            )
+                            recent_steps = self._append_step(
+                                recent_steps, action, verdict, "POLICY_DENIED",
+                                result.summary, limits,
+                            )
+                            continue
                         self.audit.append(
                             self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
                             {"tool": action.tool, "state": "APPROVED"},
@@ -274,11 +325,27 @@ class HarnessCore:
             task=task,
             recent_steps=recent_steps,
             last_feedback=last_feedback,
-            # TODO(memory-integration): retrieve project memories and honor
-            # is_governance_usable() per row (M3 carry-in) before feeding to context.
-            memories=[],
+            memories=self._retrieve_memories(),
             budget_chars=self.config.memory.context_budget_chars,
         )
+
+    def _retrieve_memories(self) -> list[dict]:
+        """Retrieve project memories for the MEMORY context tier.
+
+        Returns [] when no memory store is wired (back-compat) or no project
+        scope is set. Otherwise retrieves the top-k rows for this project and
+        filters out any row that is NOT governance-usable. Per SPEC §M10, an
+        agent-sourced memory (source=agent, confirmed=false) is 仅提示、永不作
+        治理依据 ("hint only, never a governance basis") — so it is excluded from
+        the context fed to the LLM. Retrieval is deterministic (ORDER BY
+        last_used_at DESC in the store); no network / wall-clock branching here.
+        """
+        if self.memory_store is None or self.project_id is None:
+            return []
+        rows = self.memory_store.retrieve(
+            self.project_id, top_k=self.config.memory.retrieval_top_k
+        )
+        return [r for r in rows if self.memory_store.is_governance_usable(r)]
 
     def _complete_with_retry(self, messages: list[dict]) -> str:
         """Call the LLM with up to *llm_max_retries* attempts on transient errors."""

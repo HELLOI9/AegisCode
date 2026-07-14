@@ -14,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-from aegiscode.config.loader import ConfigError, load_config
+from aegiscode.config.loader import ConfigError, load_config, load_defaults
 from aegiscode.config.schema import AegisConfig
 
 _DEFAULT_CONFIG_NAME = "aegis.yaml"
@@ -60,7 +60,11 @@ def _load_config(path: str | None) -> AegisConfig:
     default = Path.cwd() / _DEFAULT_CONFIG_NAME
     if default.exists():
         return load_config(str(default))
-    return AegisConfig()
+    # No config file: still honor the recognized env overrides (e.g.
+    # AEGIS_LLM_PROVIDER=mock) so `serve`/`run` work in a clean/container
+    # environment with no aegis.yaml present. Previously this returned a bare
+    # AegisConfig() and silently dropped the env override.
+    return load_defaults()
 
 
 # --------------------------------------------------------------------------
@@ -155,6 +159,15 @@ def _cmd_run(args) -> int:
 
     store = build_credential_store()
     db_path = str(_data_dir() / "aegis.db")
+
+    # The CLI operator is trusted (they already have a shell) and names the
+    # workspace explicitly via --workspace. That explicit choice IS the allowed
+    # base for this run, so the service-layer workspace fence (which defends the
+    # UNauthenticated HTTP API against a caller-chosen workspace like "/") does
+    # not reject the operator's own directory when it lives outside the default
+    # config root. Only set it when the caller didn't already pin allowed_base.
+    if cfg.workspace.allowed_base is None:
+        cfg.workspace.allowed_base = args.workspace
 
     # Run synchronously so the task reaches a terminal state before we return.
     try:
