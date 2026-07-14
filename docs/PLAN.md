@@ -2780,7 +2780,7 @@ git commit -m "feat: four MockLLM mechanism demos (dangerous/feedback/symlink/su
 
 ---
 
-### Task 32: CI pipeline (unit-test job + secret scan + docker build)
+### Task 32: CI pipeline (unit-test job + secret scan + docker build) ✅ DONE (3698399, +966e95d)
 
 **Files:**
 - Create: `.gitlab-ci.yml`

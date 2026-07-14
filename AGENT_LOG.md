@@ -303,3 +303,15 @@
 - **修复(091440c)**:demo①/③ 改为驱动真实 HarnessCore + AuditLog(仿 demo② 模板),经真实 AuditEventRepository 读回事件断言 audit_has_deny/deny_rule_id/feedback_is_policy_denied/no_tool_executed。limits max_steps=1 使第 2 轮 MAX_STEPS 终止,确定性无 LLM_ERROR。真实 harness 完整发出 §16.4 所需事件,无 SPEC 缺口。
 - **人工干预(重大)**:子智能体越界改 cli.py 被判定为**正当**——挖出 T29 遗留真实 bug:console script `aegiscode = aegiscode.cli:main` 无参调用 `main()`,但 `def main(argv)` 无默认值 → 所有 `aegiscode ...`(含 Docker `CMD ["aegiscode","serve"]`)启动即 TypeError 崩溃;T29 测试全部显式传 argv 故从未触及真实入口,T30 Dockerfile 评审假设"服务会启动"未跑 console script。控制器确认修复(argv=None→sys.argv[1:])并补零参入口回归测试(78d4d9f),防 docker run 再次静默崩溃。
 - **安全/确定性**:全部 MockLLM 零网络;demo③ 反 vacuous 守卫(断言软链 realpath 确实指向 /etc/passwd + 无 root: 泄漏)。
+
+### Task 32 · CI 流水线(unit-test + 密钥扫描 + docker build)— ✅ 完成 (3698399, +966e95d)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet。
+- **TDD**:RED = CI 文件 + scripts/ci_secret_scan.py 不存在,6 测试全红;GREEN = 实现后 6/6 绿,249 total;评审 fix 后 8 测试、251 total、ruff 干净。
+- **产物**:
+  - `.gitlab-ci.yml`(签字 PLAN 指定):stages=[test, security, build];`unit-test`(job 名精确匹配决策 #23)→ `pip install -e ".[dev]"` + `make test`;`secret-scan` → `python scripts/ci_secret_scan.py`(权威闸)+ gitleaks 兜底(`|| echo` 守护,缺二进制不掩盖主判定);`docker-build` → `docker build`。
+  - `.github/workflows/ci.yml`(**增值镜像**,非 PLAN 偏离):因 repo 托管于 GitHub,GitLab CI 不会执行;镜像三 job 同构 + gitleaks-action 兜底(continue-on-error),`on: [push, pull_request]` 真正在本 repo 跑起来。PR 描述注明。
+  - `scripts/ci_secret_scan.py`:自写确定性闸,复用 T25 `scan_paths`(与脱敏共享同一批正则),仅扫发行面(`aegiscode/`+`demos/`,60 文件),排除 `tests/`(故意假密钥 fixture,且 `.dockerignore` 排除 tests/docs = 不入镜像)。行钉 `ALLOWLIST`=[(assembly.py, 43)](`key = credential_store.get_key()` 的 16 字符标识符 `credential_store` 命中 `(?i)KEY=<16+>`,非真密钥);其余任何位置的同串仍失败(fail-safe)。可 import,`main(argv=None)->int`。
+- **安全 / anti-theater**:评审独立跑 plant→scan→delete 证伪:干净→exit0;植入 `aegiscode/_probe_leak.py` 带真 `sk-<40>`→exit1 且点名文件;删除→exit0,无残留。闸真会在发行面拦真密钥。
+- **两阶段评审**:Stage1 SPEC ✅(unit-test/make test/secret-scan/docker-build 齐全、stages 正确、GitHub 镜像会触发);Stage2 质量 — 0 Critical。**1 Important**:`test_scan_gate_is_not_vacuous` 只测底层正则,未测闸真实路径(shipped 遍历 + allowlist + 退出码)→ 提交的测试自身不承载 anti-theater 证明。Minor:allowlist 行钉(非宽泛,已验证仅抑制那一行)、tests/ 排除面 = 非发行面(与 .dockerignore 一致)、PyYAML `on:` 解析为布尔键(不影响 Actions 执行与测试)。
+- **控制器修复(966e95d)**:强化测试——monkeypatch `REPO_ROOT` 到 temp 树,植入带真密钥的 `aegiscode/leak.py`,断言 `main([]) == 1` 走**完整**遍历+allowlist+退出码路径;补 allowlist 机制测试(仅钉住行被抑制,同串在别处仍失败)。杀掉 regex-only 剧场。251 total 绿。
+- **人工干预**:①识别 PLAN 天真快照 `scan_paths(glob('**/*.py'))` 会因 tests/ 故意 fixture 假阳(实测发行面外 54 命中)→ 设计上把闸 scope 到发行面 + 行钉 allowlist,而非削弱 T25 扫描器(其激进正则是脱敏共享资产,测试已钉);②补 GitHub Actions 镜像使 CI 在 GitHub repo 真跑;③强化 anti-theater 测试。
