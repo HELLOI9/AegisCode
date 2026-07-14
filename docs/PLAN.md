@@ -2603,7 +2603,7 @@ git commit -m "feat: FastAPI REST (8 endpoints) over ApplicationService"
 
 ---
 
-### Task 28: WebUI (static, polling)
+### Task 28: WebUI (static, polling) ✅ DONE (84cd1b2, +a4db1c2, +3bfa682)
 
 **Files:**
 - Create: `aegiscode/service/webui/index.html`, `aegiscode/service/webui/app.js`, `aegiscode/service/webui/style.css`; Modify: `aegiscode/service/api.py` (mount static + `GET /`); Test: `tests/service/test_webui_served.py`
