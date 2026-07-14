@@ -203,3 +203,20 @@
 - 12f13fd 一提交合修四项,153 passed,`-W error::DeprecationWarning` 纯净。
 - **人工干预**:控制器直接验证 C1(python3 -c 复现 run_tests→DENY),读 SPEC §6 line 126 确认 run_tests 传感器身份,注入修复工单;C2 靠人工阅读 demo2 与 helpers 交叉核实"fail-closed"字面误命中假设并要求同时收紧断言 + 加真实执行 spy 证据。
 - **跟踪(后续)**:approval_resolver 是同步回调,不足以承载 §6 "审批暂停+持久化+跨界恢复",T26 ApplicationService 需要 resume-capable entry(非阻塞式);memory 集成本身仍是 TODO(仅接进 seam,retrieve 未调用)。
+
+---
+
+## 2026-07-14 · Milestone 5(凭据)— 新 worktree
+**Worktree**:`.claude/worktrees/m5-credentials`,分支同名(base = main @ f252662,M0-M4 已并入)。基线 make test = 153。单任务里程碑(T25 scanner 已在 M3 落地)。实现/评审 sonnet。
+
+### Task 24 · 凭据存储(keyring→.env→env,fail-safe)— ✅ 完成 (d2bbb6f, +16c801d)
+- **技能**:subagent-driven-development;实现/评审 sonnet。
+- **TDD**:RED = 模块不存在;GREEN = 4 mandatory verbatim + 6 robustness 测试;修复后 12 store 测试,165 total 纯净。
+- **产物**:aegiscode/credentials/store.py(与 M3 的 scanner.py 同包,未改动 scanner)。CredentialStore(backend, allow_dotenv=False, env=None, dotenv_path=None):set_key/clear(吞后端异常 fail-safe)/get_key(读序 keyring→.env 仅当 allow_dotenv→env,后端异常穿透下层)/status({configured, masked} 永不明文)。.env 默认关闭。env 默认 {} 不读 os.environ 防环境泄漏。
+- **两阶段评审**:spec ✅、quality Needs Fixes。
+  - Important/安全:掩码 v[:3]+…+v[-4:] 对 len<=7 的 key 完整泄漏(prefix+suffix 可重建),且原测试 'key not in str(st)' 因中间的 … 而误通过。修:len<8 → '***' 全遮;len>=8 → 'sk-…7890'。
+  - Minor:.env 值未剥引号(OPENAI_API_KEY="x" 会带引号)。修:strip 引号。
+  - 16c801d 合修 + 边界测试(7 字符→***,8 字符→前后缀式)。
+- **人工干预**:控制器在评审前用 python3 -c 复现短 key 掩码泄漏(set_key('xy')→'xy…xy'),将其作为重点交给评审并要求测试改为断言 '***' 而非弱断言;确认真 OpenAI key(~51 字符)不受影响但安全组件不应泄漏任何短密钥。
+- **验证**:xy/sk-1234→'***';sk-12345→'sk-…2345';sk-abcdef1234567890→'sk-…7890';全部 leak=False。
+- 下一步:PR + merge;之后 Milestone 6(服务/接口:T26 ApplicationService → T27 FastAPI → T28 WebUI / T29 CLI)。

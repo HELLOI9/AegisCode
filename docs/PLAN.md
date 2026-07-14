@@ -2334,7 +2334,7 @@ git commit -m "feat: HarnessCore main loop wiring governance+feedback+audit+term
 
 ## Milestone 5 — Credentials
 
-### Task 24: Credential store (keyring → .env → env, fail-safe)
+### Task 24: Credential store (keyring → .env → env, fail-safe) ✅ DONE (d2bbb6f, +16c801d)
 
 **Files:**
 - Create: `aegiscode/credentials/__init__.py`, `aegiscode/credentials/store.py`, `tests/credentials/test_store.py`
