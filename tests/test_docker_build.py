@@ -11,12 +11,20 @@ import pathlib
 
 def test_dockerfile_has_no_key_and_runtime_cmd():
     df = pathlib.Path("Dockerfile").read_text()
-    # runtime entrypoint starts the server
-    assert "aegiscode serve" in df
+    # runtime entrypoint starts the server — assert against the ACTUAL exec-form
+    # CMD line, not a comment. A contiguous "aegiscode serve" only appears in
+    # prose; the CMD splits the tokens into separate JSON array elements. Asserting
+    # the CMD tokens means deleting/reordering/shell-forming CMD fails this test.
+    cmd_lines = [ln for ln in df.splitlines() if ln.strip().startswith("CMD")]
+    assert cmd_lines, "Dockerfile must define a CMD that starts the server"
+    cmd = cmd_lines[0]
+    assert '"aegiscode"' in cmd and '"serve"' in cmd
+    # binds to all interfaces so the container is reachable from the host
+    assert '"--host"' in cmd and '"0.0.0.0"' in cmd
     # key never baked in
     assert "OPENAI_API_KEY" not in df
-    # no secret-looking ENV baked in
-    assert "ENV" not in df or "API_KEY" not in df
+    # no secret-looking API_KEY value baked in anywhere
+    assert "API_KEY" not in df
 
 
 def test_dockerfile_base_image_and_expose():
@@ -42,5 +50,6 @@ def test_dockerfile_copies_no_secrets():
 
 def test_dockerignore_excludes_secrets_and_cruft():
     di = pathlib.Path(".dockerignore").read_text()
-    for pattern in (".env", ".git", ".venv"):
-        assert pattern in di
+    # cruft + credential-bearing files must never enter the build context
+    for pattern in (".env", ".git", ".venv", "*.pem", "*.key", "*.db"):
+        assert pattern in di, f".dockerignore must exclude {pattern}"
