@@ -2422,7 +2422,7 @@ git commit -m "feat: credential store keyring/.env/env, fail-safe, masked status
 
 ---
 
-### Task 25: Self-written secret scanner
+### Task 25: Self-written secret scanner ✅ DONE (b39c3ca, +9c9c268)
 
 **Files:**
 - Create: `aegiscode/credentials/scanner.py`, `tests/credentials/test_scanner.py`
