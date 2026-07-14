@@ -144,6 +144,42 @@ def test_in_workspace_script_allowed_by_fence(tmp_path):
     assert spy.calls == [{"command": "python script.py"}]
 
 
+# ---- NON-REGRESSION: git ref/message containing a sensitive WORD ---------
+# A commit message / branch name / checkout ref is NOT a file access. The
+# no-escape sensitive-NAME check must apply only to commands that consume a
+# positional file (interpreters/linters), so `git` args that merely contain
+# "credentials"/"key"/"env" reach their intended policy verdict instead of a
+# spurious CMD_PATH_FENCE hard-DENY. (Found in M8 final review.)
+def test_git_commit_message_with_sensitive_word_not_fenced(tmp_path):
+    d, spy = _disp(tmp_path)
+    v, r = d.dispatch(_cmd("git commit -m added-credentials-helper"), _ctx(tmp_path))
+    # git commit is REQUIRE_APPROVAL by default rule — NOT a fence DENY.
+    assert v.rule_id != "CMD_PATH_FENCE"
+    assert v.decision == Decision.REQUIRE_APPROVAL
+
+
+def test_git_checkout_branch_with_sensitive_word_not_fenced(tmp_path):
+    d, spy = _disp(tmp_path)
+    v, r = d.dispatch(_cmd("git checkout credentials-fix"), _ctx(tmp_path))
+    assert v.rule_id != "CMD_PATH_FENCE"
+    assert v.decision in (Decision.ALLOW, Decision.ALLOW_WITH_AUDIT)
+
+
+def test_git_branch_slash_ref_with_sensitive_word_not_fenced(tmp_path):
+    d, spy = _disp(tmp_path)
+    v, r = d.dispatch(_cmd("git branch feature/credentials"), _ctx(tmp_path))
+    assert v.rule_id != "CMD_PATH_FENCE"
+
+
+# but git referencing a path that ESCAPES the workspace is still denied:
+def test_git_escaping_path_still_fenced(tmp_path):
+    d, spy = _disp(tmp_path)
+    v, r = d.dispatch(_cmd("git apply /etc/passwd"), _ctx(tmp_path))
+    assert v.decision == Decision.DENY
+    assert v.rule_id == "CMD_PATH_FENCE"
+    assert spy.calls == []
+
+
 # ---- execute_approved also fences --------------------------------------
 def test_execute_approved_fences_bad_path(tmp_path):
     # `pip install /etc/passwd` would be REQUIRE_APPROVAL; even once approved

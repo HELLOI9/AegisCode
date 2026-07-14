@@ -1,6 +1,7 @@
 # aegiscode/governance/dispatcher.py
 import fnmatch
 import os
+import re
 
 from aegiscode.governance.approval import SupersededError, validate_resume
 from aegiscode.governance.command_lexer import lex_command
@@ -12,45 +13,66 @@ from aegiscode.tools.result import ToolResult
 _FILE_TOOLS = {"read_file", "write_file", "list_files", "search_text"}
 
 
-def _is_path_like(token, sensitive_patterns):
-    """True if a command token should be run through the path fence.
+# Commands whose POSITIONAL argument is a file the process reads/executes — for
+# these, a bare token whose name matches a sensitive pattern (e.g. `python .env`,
+# `pytest key.pem`) is a genuine read/exec of a secret and must be fenced even
+# with no slash. For every OTHER allowlisted command (git, pip), a bare token is
+# a ref / commit message / package name, NOT a file access, so a name that
+# merely CONTAINS a sensitive word ("added-credentials-helper", "feature/
+# credentials") must NOT be hard-denied by the fence — it goes to the policy
+# engine for its normal verdict. (Escapes are still denied for ALL commands.)
+_FILE_CONSUMING_ARGV0 = re.compile(r"^(python\d?[\d.]*|pytest|ruff|mypy)$")
 
-    A token is path-like when it names a filesystem location rather than a
-    subcommand/flag/option-value:
-      - absolute ("/etc/passwd"), or explicitly relative ("./x", "../x"), or
-      - contains a "/" anywhere ("tests/", "a/b"), or
-      - its basename matches a sensitive pattern even with NO slash (".env",
-        "key.pem") — this is what catches `cat .env`.
-    Bare flags ("-q", "--hard") and bare subcommands/words ("install",
-    "status") are NOT path-like, so normal usage is not falsely denied.
+
+def _looks_like_path(token):
+    """True if a token references a filesystem location (has a path separator).
+
+    Absolute, explicitly-relative, or any token containing "/". Bare flags and
+    bare words are NOT path-like here — the sensitive-NAME case (no slash) is
+    handled separately and only for file-consuming commands.
     """
-    if not token or not isinstance(token, str):
-        return False
-    if token.startswith("/") or token.startswith("./") or token.startswith("../"):
-        return True
-    if "/" in token:
-        return True
-    # No-slash token: fence only if its basename matches a sensitive pattern.
-    base = os.path.basename(token)
-    return any(fnmatch.fnmatch(base, pat) for pat in sensitive_patterns)
+    return token.startswith(("/", "./", "../")) or "/" in token
 
 
 def _fence_command(command, root, sensitive_patterns):
-    """Return a reason string if any path-like token in `command` fails the
-    path fence, else None. A leading `--opt=` on a token is stripped so the
-    value part is checked too."""
+    """Return a reason string if a token in `command` fails the path fence, else None.
+
+    Two distinct threats, deliberately scoped differently:
+      * ESCAPE (path resolves outside the workspace) — a threat for ANY command,
+        always denied.
+      * SENSITIVE NAME (an in-workspace token whose basename matches a sensitive
+        pattern, e.g. `.env`/`*.pem`) — a read/exec threat only when the command
+        CONSUMES that token as a file (python/pytest/ruff/mypy). For git/pip a
+        bare sensitive-WORD token is a ref/message/package, not a file, so we do
+        NOT fence it (it still gets the policy engine's verdict).
+    A leading `--opt=` is stripped so the value part is checked too.
+    """
     lex = lex_command(command)
     if not lex.ok:
         # Metastructure / lex failure is the command judge's job, not the fence.
         return None
-    for token in lex.argv:
+    argv0 = lex.argv[0] if lex.argv else ""
+    file_consuming = bool(_FILE_CONSUMING_ARGV0.match(argv0))
+    for token in lex.argv[1:]:
         candidate = token
         if token.startswith("--") and "=" in token:
             candidate = token.split("=", 1)[1]  # check the value after --opt=
-        if not _is_path_like(candidate, sensitive_patterns):
+
+        path_like = _looks_like_path(candidate)
+        sensitive_name = any(
+            fnmatch.fnmatch(os.path.basename(candidate), pat)
+            for pat in sensitive_patterns
+        )
+        if not path_like and not sensitive_name:
             continue
+
         pv = check_path(candidate, root, sensitive_patterns)
-        if not pv.allowed:
+        if pv.allowed:
+            continue
+        # Escape reasons apply to every command. A pure sensitive-NAME denial
+        # (path stays in-workspace) is enforced only for file-consuming commands.
+        is_escape = "escape" in pv.reason or "outside workspace" in pv.reason
+        if is_escape or file_consuming:
             return pv.reason
     return None
 

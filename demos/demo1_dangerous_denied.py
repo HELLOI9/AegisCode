@@ -3,8 +3,11 @@
 Mechanism (proven end-to-end through the REAL harness, no theater):
   1. One ``MockLLM`` step scripts a ``run_command`` for ``rm -rf /``.
   2. A genuine ``Dispatcher`` (``build_dispatcher``) runs the real governance
-     gate: ``rm`` is not in the command allowlist, so the verdict is DENY and the
-     tool is refused *before* execution.
+     gate. ``rm -rf /`` is refused DENY *before* execution — the ``/`` argument
+     escapes the workspace so the run_command path fence (rule ``CMD_PATH_FENCE``)
+     fires; ``rm`` is also absent from the command allowlist. Either way the tool
+     never runs. (The demo asserts a DENY carrying a rule_id, not a specific
+     rule, so it is robust to which gate fires first.)
   3. The real ``HarnessCore`` drives that step against a real ``AuditLog`` on a
      tmp sqlite db. On a DENY the harness genuinely emits a ``GOVERNANCE_DECISION``
      audit event (decision=DENY, carrying the rule_id) and a ``FEEDBACK`` event
