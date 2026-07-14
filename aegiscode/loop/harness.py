@@ -83,6 +83,10 @@ class HarnessCore:
                     self.ctx.task_id, c.step, EventType.ACTION_PROPOSED,
                     {"raw": raw_text, "error": str(exc)},
                 )
+                self.audit.append(
+                    self.ctx.task_id, c.step, EventType.FEEDBACK,
+                    {"category": "INVALID_ACTION", "detail": last_feedback},
+                )
                 continue
 
             # Reset invalid_actions on a successful parse
@@ -140,7 +144,29 @@ class HarnessCore:
                     recent_steps = self._append_step(recent_steps, action, verdict, "APPROVAL_REJECTED", "", limits)
                     continue
 
-            # At this point result is not None (ALLOW/ALLOW_WITH_AUDIT/DENY all produce one)
+            # ---- handle DENY ----
+            # The dispatcher already refused to execute the tool. Do NOT emit a
+            # TOOL_EXECUTED event (nothing ran); feed back POLICY_DENIED, count it
+            # as a consecutive failure, advance the step, and continue (no stop).
+            if verdict.decision == Decision.DENY:
+                last_feedback = self._format_feedback("POLICY_DENIED", result)
+                self.audit.append(
+                    self.ctx.task_id, c.step, EventType.FEEDBACK,
+                    {"category": "POLICY_DENIED", "detail": last_feedback},
+                )
+                c = LoopCounters(
+                    step=c.step + 1,
+                    consecutive_failures=c.consecutive_failures + 1,
+                    invalid_actions=c.invalid_actions,
+                    no_progress_hits=c.no_progress_hits,
+                )
+                recent_steps = self._append_step(
+                    recent_steps, action, verdict, "POLICY_DENIED",
+                    result.summary if result else "", limits,
+                )
+                continue
+
+            # At this point result is not None (ALLOW/ALLOW_WITH_AUDIT produce one)
             assert result is not None  # REQUIRE_APPROVAL without approval was handled above
 
             self.audit.append(
@@ -149,14 +175,25 @@ class HarnessCore:
             )
 
             # ---- finish tool ----
+            # Only COMPLETED terminates. If final verification fails, FINISH_REJECTED
+            # is a FEEDBACK category (not a return) — the loop continues and may later
+            # hit MAX_STEPS / MAX_CONSECUTIVE_FAILURES.
             if action.tool == "finish":
-                completed = self.final_verifier()
-                if completed:
-                    reason = TerminationReason.COMPLETED
-                else:
-                    reason = TerminationReason.FINISH_REJECTED
-                self._audit_term(c, reason)
-                return reason
+                if self.final_verifier():
+                    self._audit_term(c, TerminationReason.COMPLETED)
+                    return TerminationReason.COMPLETED
+                last_feedback = "FINISH_REJECTED: final verification failed"
+                self.audit.append(
+                    self.ctx.task_id, c.step, EventType.FEEDBACK,
+                    {"category": "FINISH_REJECTED", "detail": last_feedback},
+                )
+                c = LoopCounters(
+                    step=c.step + 1,
+                    consecutive_failures=c.consecutive_failures + 1,
+                    invalid_actions=c.invalid_actions,
+                    no_progress_hits=c.no_progress_hits,
+                )
+                continue
 
             # ---- classify result for feedback ----
             failure_cat = classify(result)
@@ -216,8 +253,9 @@ class HarnessCore:
             budget_chars=self.config.memory.context_budget_chars,
         )
 
-    def _complete_with_retry(self, messages: list[dict], retries: int = 3) -> str:
-        """Call the LLM with up to *retries* attempts on transient errors."""
+    def _complete_with_retry(self, messages: list[dict]) -> str:
+        """Call the LLM with up to *llm_max_retries* attempts on transient errors."""
+        retries = self.config.limits.llm_max_retries
         last_exc: Exception | None = None
         for attempt in range(retries):
             try:

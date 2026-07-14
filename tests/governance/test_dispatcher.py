@@ -100,3 +100,56 @@ def test_require_approval_does_not_execute(tmp_path):
         SimpleNamespace(resolve=lambda p: str(tmp_path) + "/" + p))
     assert verdict.decision == Decision.REQUIRE_APPROVAL and result is None
     assert executed == []  # tool must NOT execute when approval required
+
+
+def test_execute_approved_still_enforces_path_fence(tmp_path):
+    """An approved write escaping the workspace must be blocked by the path fence,
+    NOT executed — the fence is a workspace-safety invariant, not a policy decision."""
+    executed = []
+
+    class SpyWrite:
+        name = "write_file"
+        def run(self, arguments, ctx):
+            executed.append(arguments)
+            return ToolResult(tool="write_file", status="success", summary="written")
+
+    reg = ToolRegistry(); reg.register(SpyWrite())
+    eng = PolicyEngine([], default_fn=lambda a, c: GovernanceVerdict(Decision.ALLOW, "D", "d"))
+    d = Dispatcher(reg, eng, path_config=SimpleNamespace(
+        workspace_root=str(tmp_path), sensitive_patterns=[".env"]))
+
+    # Traversal escape via relative path.
+    r = d.execute_approved(
+        Action(tool="write_file", arguments={"path": "../evil.py", "content": "x"}),
+        SimpleNamespace())
+    assert r.status == "denied" and r.category == "POLICY_DENIED"
+    assert executed == []  # tool must NOT run on fence violation
+
+    # Absolute path outside the workspace.
+    r2 = d.execute_approved(
+        Action(tool="write_file", arguments={"path": "/etc/passwd", "content": "x"}),
+        SimpleNamespace())
+    assert r2.status == "denied" and r2.category == "POLICY_DENIED"
+    assert executed == []
+
+
+def test_execute_approved_runs_when_path_inside_workspace(tmp_path):
+    """Sanity: an approved write inside the workspace still executes normally."""
+    executed = []
+
+    class SpyWrite:
+        name = "write_file"
+        def run(self, arguments, ctx):
+            executed.append(arguments)
+            return ToolResult(tool="write_file", status="success", summary="written")
+
+    reg = ToolRegistry(); reg.register(SpyWrite())
+    eng = PolicyEngine([], default_fn=lambda a, c: GovernanceVerdict(Decision.ALLOW, "D", "d"))
+    d = Dispatcher(reg, eng, path_config=SimpleNamespace(
+        workspace_root=str(tmp_path), sensitive_patterns=[".env"]))
+
+    r = d.execute_approved(
+        Action(tool="write_file", arguments={"path": "src/ok.py", "content": "x"}),
+        SimpleNamespace())
+    assert r.status == "success"
+    assert executed == [{"path": "src/ok.py", "content": "x"}]

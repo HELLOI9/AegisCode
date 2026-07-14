@@ -89,4 +89,22 @@ class Dispatcher:
                 category="INVALID_ACTION",
                 summary=f"unknown tool {action.tool}",
             )
+
+        # Path fence is a workspace-safety invariant, NOT a policy decision:
+        # even an approved write must never escape the workspace or touch a
+        # sensitive file. Re-check the same fence that dispatch() runs.
+        if action.tool in _FILE_TOOLS and "path" in action.arguments:
+            pv = check_path(
+                action.arguments["path"],
+                self.pc.workspace_root,
+                self.pc.sensitive_patterns,
+            )
+            if not pv.allowed:
+                return ToolResult(
+                    tool=action.tool,
+                    status="denied",
+                    category="POLICY_DENIED",
+                    summary=pv.reason,
+                )
+
         return tool.run(action.arguments, ctx)

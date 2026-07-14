@@ -18,6 +18,7 @@ class Limits(_Strict):
     max_consecutive_failures: int = 5
     no_progress_repeat_limit: int = 3
     action_retry_limit: int = 3
+    llm_max_retries: int = 3
     command_timeout_sec: int = 30
     output_max_bytes: int = 65536
 
