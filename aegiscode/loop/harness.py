@@ -28,6 +28,7 @@ class HarnessCore:
         ctx,
         final_verifier,
         approval_resolver=None,
+        cancel_check=None,
     ):
         self.llm = llm
         self.dispatcher = dispatcher
@@ -36,6 +37,10 @@ class HarnessCore:
         self.ctx = ctx
         self.final_verifier = final_verifier
         self.approval_resolver = approval_resolver
+        # Optional cooperative-cancellation hook: () -> bool. When it returns
+        # True at the top of a turn, the loop stops with CANCELLED. This is the
+        # seam T26 ApplicationService uses to cancel a running task.
+        self.cancel_check = cancel_check
 
     # ------------------------------------------------------------------ #
     # Public entry point                                                   #
@@ -59,183 +64,194 @@ class HarnessCore:
                 self._audit_term(c, reason)
                 return reason
 
-            # ---- build context & call LLM ----
-            messages = self._build(task_description, recent_steps, last_feedback)
-            try:
-                raw_text = self._complete_with_retry(messages)
-            except Exception as exc:  # noqa: BLE001
-                reason = TerminationReason.LLM_ERROR
-                self._audit_term(c, reason)
-                return reason
+            # ---- cooperative cancellation ----
+            if self.cancel_check is not None and self.cancel_check():
+                self._audit_term(c, TerminationReason.CANCELLED)
+                return TerminationReason.CANCELLED
 
-            # ---- parse action ----
+            # ---- per-turn body (fail-safe: an unexpected exception must
+            # never crash the caller; audit INTERNAL_ERROR and stop) ----
             try:
-                action = parse_action(raw_text)
-            except ActionParseError as exc:
+                # ---- build context & call LLM ----
+                messages = self._build(task_description, recent_steps, last_feedback)
+                try:
+                    raw_text = self._complete_with_retry(messages)
+                except Exception as exc:  # noqa: BLE001
+                    reason = TerminationReason.LLM_ERROR
+                    self._audit_term(c, reason)
+                    return reason
+
+                # ---- parse action ----
+                try:
+                    action = parse_action(raw_text)
+                except ActionParseError as exc:
+                    c = LoopCounters(
+                        step=c.step,
+                        consecutive_failures=c.consecutive_failures,
+                        invalid_actions=c.invalid_actions + 1,
+                        no_progress_hits=c.no_progress_hits,
+                    )
+                    last_feedback = f"PARSE_ERROR: {exc}"
+                    self.audit.append(
+                        self.ctx.task_id, c.step, EventType.ACTION_PROPOSED,
+                        {"raw": raw_text, "error": str(exc)},
+                    )
+                    self.audit.append(
+                        self.ctx.task_id, c.step, EventType.FEEDBACK,
+                        {"category": "INVALID_ACTION", "detail": last_feedback},
+                    )
+                    continue
+
+                # Reset invalid_actions on a successful parse
                 c = LoopCounters(
                     step=c.step,
                     consecutive_failures=c.consecutive_failures,
-                    invalid_actions=c.invalid_actions + 1,
+                    invalid_actions=0,
                     no_progress_hits=c.no_progress_hits,
                 )
-                last_feedback = f"PARSE_ERROR: {exc}"
+
                 self.audit.append(
                     self.ctx.task_id, c.step, EventType.ACTION_PROPOSED,
-                    {"raw": raw_text, "error": str(exc)},
+                    {"tool": action.tool, "arguments": action.arguments},
                 )
+
+                # ---- dispatch through governance ----
+                verdict, result = self.dispatcher.dispatch(action, self.ctx)
+
                 self.audit.append(
-                    self.ctx.task_id, c.step, EventType.FEEDBACK,
-                    {"category": "INVALID_ACTION", "detail": last_feedback},
+                    self.ctx.task_id, c.step, EventType.GOVERNANCE_DECISION,
+                    {
+                        "tool": action.tool,
+                        "decision": verdict.decision.value,
+                        "rule": verdict.rule_id,
+                        "reason": verdict.reason,
+                    },
                 )
-                continue
 
-            # Reset invalid_actions on a successful parse
-            c = LoopCounters(
-                step=c.step,
-                consecutive_failures=c.consecutive_failures,
-                invalid_actions=0,
-                no_progress_hits=c.no_progress_hits,
-            )
+                # ---- handle REQUIRE_APPROVAL ----
+                if verdict.decision == Decision.REQUIRE_APPROVAL:
+                    if self.approval_resolver is not None:
+                        approved = self.approval_resolver(action, verdict)
+                    else:
+                        approved = False
 
-            self.audit.append(
-                self.ctx.task_id, c.step, EventType.ACTION_PROPOSED,
-                {"tool": action.tool, "arguments": action.arguments},
-            )
+                    if approved:
+                        result = self.dispatcher.execute_approved(action, self.ctx)
+                        self.audit.append(
+                            self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
+                            {"tool": action.tool, "state": "APPROVED"},
+                        )
+                    else:
+                        # Not approved — treat as failure
+                        self.audit.append(
+                            self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
+                            {"tool": action.tool, "state": "REJECTED"},
+                        )
+                        last_feedback = "APPROVAL_REJECTED: action was not approved"
+                        c = LoopCounters(
+                            step=c.step + 1,
+                            consecutive_failures=c.consecutive_failures + 1,
+                            invalid_actions=c.invalid_actions,
+                            no_progress_hits=c.no_progress_hits,
+                        )
+                        recent_steps = self._append_step(recent_steps, action, verdict, "APPROVAL_REJECTED", "", limits)
+                        continue
 
-            # ---- dispatch through governance ----
-            verdict, result = self.dispatcher.dispatch(action, self.ctx)
-
-            self.audit.append(
-                self.ctx.task_id, c.step, EventType.GOVERNANCE_DECISION,
-                {
-                    "tool": action.tool,
-                    "decision": verdict.decision.value,
-                    "rule": verdict.rule_id,
-                    "reason": verdict.reason,
-                },
-            )
-
-            # ---- handle REQUIRE_APPROVAL ----
-            if verdict.decision == Decision.REQUIRE_APPROVAL:
-                if self.approval_resolver is not None:
-                    approved = self.approval_resolver(action, verdict)
-                else:
-                    approved = False
-
-                if approved:
-                    result = self.dispatcher.execute_approved(action, self.ctx)
+                # ---- handle DENY ----
+                # The dispatcher already refused to execute the tool. Do NOT emit a
+                # TOOL_EXECUTED event (nothing ran); feed back POLICY_DENIED, count it
+                # as a consecutive failure, advance the step, and continue (no stop).
+                if verdict.decision == Decision.DENY:
+                    last_feedback = self._format_feedback("POLICY_DENIED", result)
                     self.audit.append(
-                        self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
-                        {"tool": action.tool, "state": "APPROVED"},
+                        self.ctx.task_id, c.step, EventType.FEEDBACK,
+                        {"category": "POLICY_DENIED", "detail": last_feedback},
                     )
-                else:
-                    # Not approved — treat as failure
-                    self.audit.append(
-                        self.ctx.task_id, c.step, EventType.APPROVAL_DECIDED,
-                        {"tool": action.tool, "state": "REJECTED"},
-                    )
-                    last_feedback = "APPROVAL_REJECTED: action was not approved"
                     c = LoopCounters(
                         step=c.step + 1,
                         consecutive_failures=c.consecutive_failures + 1,
                         invalid_actions=c.invalid_actions,
                         no_progress_hits=c.no_progress_hits,
                     )
-                    recent_steps = self._append_step(recent_steps, action, verdict, "APPROVAL_REJECTED", "", limits)
+                    recent_steps = self._append_step(
+                        recent_steps, action, verdict, "POLICY_DENIED",
+                        result.summary if result else "", limits,
+                    )
                     continue
 
-            # ---- handle DENY ----
-            # The dispatcher already refused to execute the tool. Do NOT emit a
-            # TOOL_EXECUTED event (nothing ran); feed back POLICY_DENIED, count it
-            # as a consecutive failure, advance the step, and continue (no stop).
-            if verdict.decision == Decision.DENY:
-                last_feedback = self._format_feedback("POLICY_DENIED", result)
+                # At this point result is not None (ALLOW/ALLOW_WITH_AUDIT produce one)
+                assert result is not None  # REQUIRE_APPROVAL without approval was handled above
+
+                self.audit.append(
+                    self.ctx.task_id, c.step, EventType.TOOL_EXECUTED,
+                    {"tool": action.tool, "status": result.status},
+                )
+
+                # ---- finish tool ----
+                # Only COMPLETED terminates. If final verification fails, FINISH_REJECTED
+                # is a FEEDBACK category (not a return) — the loop continues and may later
+                # hit MAX_STEPS / MAX_CONSECUTIVE_FAILURES.
+                if action.tool == "finish":
+                    if self.final_verifier():
+                        self._audit_term(c, TerminationReason.COMPLETED)
+                        return TerminationReason.COMPLETED
+                    last_feedback = "FINISH_REJECTED: final verification failed"
+                    self.audit.append(
+                        self.ctx.task_id, c.step, EventType.FEEDBACK,
+                        {"category": "FINISH_REJECTED", "detail": last_feedback},
+                    )
+                    c = LoopCounters(
+                        step=c.step + 1,
+                        consecutive_failures=c.consecutive_failures + 1,
+                        invalid_actions=c.invalid_actions,
+                        no_progress_hits=c.no_progress_hits,
+                    )
+                    continue
+
+                # ---- classify result for feedback ----
+                failure_cat = classify(result)
+
+                # ---- progress tracking ----
+                fp = fingerprint(action)
+                no_progress = tracker.seen(fp)
+
+                if no_progress:
+                    c = LoopCounters(
+                        step=c.step + 1,
+                        consecutive_failures=c.consecutive_failures,
+                        invalid_actions=c.invalid_actions,
+                        no_progress_hits=c.no_progress_hits + 1,
+                    )
+                    last_feedback = "NO_PROGRESS: repeated action detected"
+                elif failure_cat is not None:
+                    c = LoopCounters(
+                        step=c.step + 1,
+                        consecutive_failures=c.consecutive_failures + 1,
+                        invalid_actions=c.invalid_actions,
+                        no_progress_hits=c.no_progress_hits,
+                    )
+                    last_feedback = self._format_feedback(failure_cat, result)
+                else:
+                    # success
+                    c = LoopCounters(
+                        step=c.step + 1,
+                        consecutive_failures=0,
+                        invalid_actions=c.invalid_actions,
+                        no_progress_hits=c.no_progress_hits,
+                    )
+                    last_feedback = ""
+
                 self.audit.append(
                     self.ctx.task_id, c.step, EventType.FEEDBACK,
-                    {"category": "POLICY_DENIED", "detail": last_feedback},
+                    {"category": failure_cat or "SUCCESS", "detail": last_feedback},
                 )
-                c = LoopCounters(
-                    step=c.step + 1,
-                    consecutive_failures=c.consecutive_failures + 1,
-                    invalid_actions=c.invalid_actions,
-                    no_progress_hits=c.no_progress_hits,
-                )
+
                 recent_steps = self._append_step(
-                    recent_steps, action, verdict, "POLICY_DENIED",
-                    result.summary if result else "", limits,
+                    recent_steps, action, verdict, failure_cat, result.summary if result else "", limits
                 )
-                continue
-
-            # At this point result is not None (ALLOW/ALLOW_WITH_AUDIT produce one)
-            assert result is not None  # REQUIRE_APPROVAL without approval was handled above
-
-            self.audit.append(
-                self.ctx.task_id, c.step, EventType.TOOL_EXECUTED,
-                {"tool": action.tool, "status": result.status},
-            )
-
-            # ---- finish tool ----
-            # Only COMPLETED terminates. If final verification fails, FINISH_REJECTED
-            # is a FEEDBACK category (not a return) — the loop continues and may later
-            # hit MAX_STEPS / MAX_CONSECUTIVE_FAILURES.
-            if action.tool == "finish":
-                if self.final_verifier():
-                    self._audit_term(c, TerminationReason.COMPLETED)
-                    return TerminationReason.COMPLETED
-                last_feedback = "FINISH_REJECTED: final verification failed"
-                self.audit.append(
-                    self.ctx.task_id, c.step, EventType.FEEDBACK,
-                    {"category": "FINISH_REJECTED", "detail": last_feedback},
-                )
-                c = LoopCounters(
-                    step=c.step + 1,
-                    consecutive_failures=c.consecutive_failures + 1,
-                    invalid_actions=c.invalid_actions,
-                    no_progress_hits=c.no_progress_hits,
-                )
-                continue
-
-            # ---- classify result for feedback ----
-            failure_cat = classify(result)
-
-            # ---- progress tracking ----
-            fp = fingerprint(action)
-            no_progress = tracker.seen(fp)
-
-            if no_progress:
-                c = LoopCounters(
-                    step=c.step + 1,
-                    consecutive_failures=c.consecutive_failures,
-                    invalid_actions=c.invalid_actions,
-                    no_progress_hits=c.no_progress_hits + 1,
-                )
-                last_feedback = "NO_PROGRESS: repeated action detected"
-            elif failure_cat is not None:
-                c = LoopCounters(
-                    step=c.step + 1,
-                    consecutive_failures=c.consecutive_failures + 1,
-                    invalid_actions=c.invalid_actions,
-                    no_progress_hits=c.no_progress_hits,
-                )
-                last_feedback = self._format_feedback(failure_cat, result)
-            else:
-                # success
-                c = LoopCounters(
-                    step=c.step + 1,
-                    consecutive_failures=0,
-                    invalid_actions=c.invalid_actions,
-                    no_progress_hits=c.no_progress_hits,
-                )
-                last_feedback = ""
-
-            self.audit.append(
-                self.ctx.task_id, c.step, EventType.FEEDBACK,
-                {"category": failure_cat or "SUCCESS", "detail": last_feedback},
-            )
-
-            recent_steps = self._append_step(
-                recent_steps, action, verdict, failure_cat, result.summary if result else "", limits
-            )
+            except Exception:  # noqa: BLE001
+                self._audit_term(c, TerminationReason.INTERNAL_ERROR)
+                return TerminationReason.INTERNAL_ERROR
 
     # ------------------------------------------------------------------ #
     # Private helpers                                                      #
@@ -249,6 +265,8 @@ class HarnessCore:
             task=task,
             recent_steps=recent_steps,
             last_feedback=last_feedback,
+            # TODO(memory-integration): retrieve project memories and honor
+            # is_governance_usable() per row (M3 carry-in) before feeding to context.
             memories=[],
             budget_chars=self.config.memory.context_budget_chars,
         )

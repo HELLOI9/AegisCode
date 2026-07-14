@@ -64,7 +64,60 @@ def test_demo2_failure_feedback_changes_action(tmp_path):
         '{"tool":"finish","arguments":{}}',
     ], final_ok=True, fail_first_test=True)
     reason = h.run("fix f")
-    # feedback from round2 must appear in round3's messages
-    assert any("TEST_FAILURE" in m or "fail" in m.lower() for m in spy.messages_at_round(3))
+    # The ACTUAL failure signal from round2 must reach round3's messages —
+    # no "fail" substring escape hatch (that matched POLICY_DENIED "fail-closed"
+    # back when run_tests was wrongly DENied).
+    assert any("TEST_FAILURE" in m for m in spy.messages_at_round(3))
+    # run_tests actually EXECUTED (the sensor ran, was not denied) — twice:
+    # round2 (fail) and round4 (pass).
+    assert spy.run_tests_executions >= 2
+    # round2 produced a genuine TEST_FAILURE feedback event, not POLICY_DENIED.
+    assert any(
+        e["event_type"] == "FEEDBACK" and e.get("category") == "TEST_FAILURE"
+        for e in spy.audit_events
+    )
     assert spy.action_at(3) != spy.action_at(1)        # action changed
     assert reason == TerminationReason.COMPLETED        # decided by final_verifier, not MockLLM
+
+
+def test_internal_error_on_unexpected_exception(tmp_path):
+    # An unexpected exception inside the per-turn body must not crash the caller:
+    # the loop audits a TERMINATION/INTERNAL_ERROR and returns INTERNAL_ERROR.
+    h, spy = make_harness(tmp_path, scripted=[
+        '{"tool":"finish","arguments":{}}',
+    ], final_ok=True)
+
+    class _Boom:
+        def dispatch(self, action, ctx):
+            raise RuntimeError("boom")
+
+    h.dispatcher = _Boom()
+    reason = h.run("trigger error")
+    assert reason == TerminationReason.INTERNAL_ERROR
+    assert any(
+        e["event_type"] == "TERMINATION" and e.get("reason") == "INTERNAL_ERROR"
+        for e in spy.audit_events
+    )
+
+
+def test_cancel_check_returns_cancelled(tmp_path):
+    # A cancel_check that trips at the top of the loop → run() returns CANCELLED
+    # and audits it, without executing any tools.
+    h, spy = make_harness(tmp_path, scripted=[
+        '{"tool":"finish","arguments":{}}',
+    ], final_ok=True)
+
+    calls = {"n": 0}
+
+    def cancel_check() -> bool:
+        calls["n"] += 1
+        return calls["n"] >= 1  # cancel on the first check
+
+    h.cancel_check = cancel_check
+    reason = h.run("cancel me")
+    assert reason == TerminationReason.CANCELLED
+    assert any(
+        e["event_type"] == "TERMINATION" and e.get("reason") == "CANCELLED"
+        for e in spy.audit_events
+    )
+    assert spy.command_executions == 0

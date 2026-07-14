@@ -282,3 +282,12 @@ def test_write_allowlist_dir_without_trailing_slash_normalized():
     action_bad = Action(tool="write_file", arguments={"path": "src_evil/file.py", "content": ""})
     v = fn(action_bad, _ctx())
     assert v.decision != Decision.ALLOW  # should be REQUIRE_APPROVAL (default write tier)
+
+
+def test_run_tests_is_sensor_tier_allow():
+    """run_tests is the feedback sensor (SPEC §6) → must ALLOW, not fall to
+    the fail-closed TIER_DEFAULT catch-all (which would DENY)."""
+    fn = build_default_fn(AegisConfig())
+    v = fn(Action(tool="run_tests", arguments={}), _ctx())
+    assert v.decision == Decision.ALLOW
+    assert v.rule_id == "TIER_SENSOR"

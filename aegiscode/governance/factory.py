@@ -45,6 +45,16 @@ def build_default_fn(config) -> Callable:
         if tool == "finish":
             return GovernanceVerdict(Decision.ALLOW, "TIER_FINISH", "finish action always allowed")
 
+        # --- run_tests: feedback sensor (SPEC §6) — read-only observation of
+        # test state via a fixed command, not an external-world mutation. It is
+        # the feedback sensor and MUST be allowed to execute. ---
+        if tool == "run_tests":
+            return GovernanceVerdict(
+                Decision.ALLOW,
+                "TIER_SENSOR",
+                "run_tests is the feedback sensor → always allowed to execute",
+            )
+
         # --- readonly tools ---
         if tool in _READONLY_TOOLS:
             decision = default_decisions.readonly

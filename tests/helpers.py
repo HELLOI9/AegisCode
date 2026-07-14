@@ -42,6 +42,7 @@ class SpyRunTestsTool:
 
     def run(self, arguments, ctx):
         self._call_count += 1
+        self._spy.run_tests_executions += 1
         if self._fail_first and self._call_count == 1:
             return ToolResult(
                 tool=self.name,
@@ -82,6 +83,7 @@ class Spy:
 
     def __init__(self):
         self.command_executions: int = 0
+        self.run_tests_executions: int = 0
         self.audit_events: list[dict] = []
         self._messages_by_round: dict[int, list[str]] = {}
         self._actions_by_round: dict[int, str] = {}
