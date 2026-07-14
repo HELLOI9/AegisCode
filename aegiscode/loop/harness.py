@@ -76,7 +76,7 @@ class HarnessCore:
                 messages = self._build(task_description, recent_steps, last_feedback)
                 try:
                     raw_text = self._complete_with_retry(messages)
-                except Exception as exc:  # noqa: BLE001
+                except Exception:  # noqa: BLE001
                     reason = TerminationReason.LLM_ERROR
                     self._audit_term(c, reason)
                     return reason
