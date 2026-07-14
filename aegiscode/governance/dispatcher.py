@@ -74,3 +74,37 @@ class Dispatcher:
 
         # ALLOW or ALLOW_WITH_AUDIT — execute.
         return (verdict, tool.run(action.arguments, ctx))
+
+    def execute_approved(self, action, ctx):
+        """Bypass the governance gate and directly execute an already-approved action.
+
+        Used after REQUIRE_APPROVAL has been resolved in favour of approval.
+        Returns ToolResult from the tool's run method.
+        """
+        tool = self.registry.get(action.tool)
+        if tool is None:
+            return ToolResult(
+                tool=action.tool,
+                status="error",
+                category="INVALID_ACTION",
+                summary=f"unknown tool {action.tool}",
+            )
+
+        # Path fence is a workspace-safety invariant, NOT a policy decision:
+        # even an approved write must never escape the workspace or touch a
+        # sensitive file. Re-check the same fence that dispatch() runs.
+        if action.tool in _FILE_TOOLS and "path" in action.arguments:
+            pv = check_path(
+                action.arguments["path"],
+                self.pc.workspace_root,
+                self.pc.sensitive_patterns,
+            )
+            if not pv.allowed:
+                return ToolResult(
+                    tool=action.tool,
+                    status="denied",
+                    category="POLICY_DENIED",
+                    summary=pv.reason,
+                )
+
+        return tool.run(action.arguments, ctx)

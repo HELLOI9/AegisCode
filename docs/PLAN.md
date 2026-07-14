@@ -2129,7 +2129,7 @@ git commit -m "feat: context builder (6-tier budget + deterministic oldest-step 
 
 ---
 
-### Task 22: Termination reasons + priority decision
+### Task 22: Termination reasons + priority decision ✅ DONE (7b63874, +69867d7)
 
 **Files:**
 - Create: `aegiscode/loop/__init__.py`, `aegiscode/loop/termination.py`, `tests/loop/test_termination.py`
@@ -2212,7 +2212,7 @@ git commit -m "feat: termination reasons (9) + counting-tier decide_termination"
 
 ## Milestone 4 — Core loop
 
-### Task 23: HarnessCore main loop (integration)
+### Task 23: HarnessCore main loop (integration) ✅ DONE (1632c54, +7b7dbe4)
 
 **Files:**
 - Create: `aegiscode/loop/harness.py`, `tests/loop/test_harness.py`, **`tests/helpers.py`** (the shared test factory; Step 1 imports `make_harness` from it, and Tasks 26/27 later extend it with `make_service`/`make_api_client`)
