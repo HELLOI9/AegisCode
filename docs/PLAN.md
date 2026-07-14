@@ -2691,7 +2691,7 @@ git commit -m "feat: CLI init/run/serve/config/key/demo"
 
 ## Milestone 7 — Distribution & Demos
 
-### Task 30: Dockerfile + keyring fallback
+### Task 30: Dockerfile + keyring fallback ✅ DONE (1876545, +342fa8e)
 
 **Files:**
 - Create: `Dockerfile`, `.dockerignore`, `tests/test_docker_build.py` (optional smoke, marked slow)

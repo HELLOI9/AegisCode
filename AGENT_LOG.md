@@ -280,3 +280,16 @@
 - **I-2(Important,已修 46874b6)**:async pause/resume 从未经 API 层测试(所有 API 测试 sync=True)——正是掩盖 I-1 的集成缺口。补:make_async_api_client(sync=False)+ 两条 HTTP 端到端测试(approve → COMPLETED + 行 APPROVED + chain_valid;reject → 副作用断言 secret.txt 永不落盘 + 行 REJECTED),_poll_http 5s 硬上限防挂。RED 揭示真实行为事实:reject 的写被拒但循环仍可 finish(治理拒的是动作非整轮),故 reject 断言改用确定性副作用。
 - **人工干预**:控制器将 I-1/I-2 从"fast-follow 建议"升级为合并前必修(理由:两者都落在本里程碑主推的 serve async 审批路径,且 AegisCode 以审批正确性为卖点);I-1 一行内核修复由控制器直接落地并加 doc 注释,I-2 派 subagent 补 API 层回归测试(同时守护 I-1)。
 - **Minor(未阻塞,记录留待清理)**:test_app_service 若干 vacuous 断言(state in 全集 / step_count>=0;机制实为别处严格断言覆盖);redact 未传 workspace_root(绝对路径相对化分支未启用,当前工具皆相对路径无泄漏);test_run_openai 双调 capsys.readouterr()。
+
+---
+
+## 2026-07-14 · Milestone 7(分发与演示)— 新 worktree
+**Worktree**:`.claude/worktrees/m7-distribution`,分支同名(base = main @ 7d42001,M0-M6 已并入)。基线 make test = 233。链:T30 Dockerfile → T31 四机制演示 → T32 CI。实现/评审 sonnet。
+
+### Task 30 · Dockerfile + keyring 运行时降级 — ✅ 完成 (1876545, +342fa8e)
+- **技能**:subagent-driven-development;实现/评审 sonnet。
+- **TDD**:RED = Dockerfile/.dockerignore 不存在,4 测试 FileNotFoundError 全红;GREEN = 实现后 4/4 绿,237 total。
+- **产物**:`Dockerfile`(python:3.12-slim,`COPY pyproject.toml + aegiscode/`,`pip install --no-cache-dir -e .`,`EXPOSE 8000`,exec-form `CMD ["aegiscode","serve","--host","0.0.0.0","--port","8000"]`)+ `.dockerignore`(排除 .git/.venv/tests/docs/.env/.env.*/*.pem/*.key/*.db/*.sqlite*/__pycache__/.superpowers/.claude)+ `tests/test_docker_build.py`(4 文本级测试,不需 docker daemon)。
+- **安全(SPEC §19 / 决策 #19)**:key 绝不进镜像层(无 `ENV *_KEY`、无 `COPY .env`),运行时 `-e` 注入;workspace `-v host:/workspace` 挂载;容器内 keyring 不可用自动回退 env(T24 `get_key` try/except 已处理)。
+- **两阶段评审**:Stage1 SPEC 合规 ✅(key 不烤入、serve 0.0.0.0:8000、editable install 依赖齐全、webui 静态资源随 `COPY aegiscode` 进镜像且 editable 安装直读源码树)。Stage2 质量 — **1 Important(test theater)**:`assert "aegiscode serve" in df` 仅靠头部注释满足(exec-form CMD 把 token 拆成 JSON 数组元素,连续子串不在 CMD 行),删掉整个 CMD 行测试仍绿 → 守卫核心运行时不变量却验的是注释。
+- **人工干预(控制器亲自修)**:强化测试断言 exec-form CMD 各 token(`"aegiscode"`/`"serve"`/`"--host"`/`"0.0.0.0"`/`"--port"`/`"8000"`,删/乱序/shell-form 即失败);修 `ENV not in df or API_KEY not in df` 的重言式断言;强化 .dockerignore 测试断言 `*.pem`/`*.key`/`*.db`——**该强化测试立刻抓出真实缺陷**:提交的 .dockerignore 实际不含 `*.pem`/`*.key`(子智能体报告声称已加但提交文件不符,与 M6 的报告-实际漂移同源),已补齐。呼应教训6(守卫必须打在最脆弱的真实路径,不能靠注释/报告自我掩盖)。
