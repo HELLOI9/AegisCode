@@ -2212,7 +2212,7 @@ git commit -m "feat: termination reasons (9) + counting-tier decide_termination"
 
 ## Milestone 4 — Core loop
 
-### Task 23: HarnessCore main loop (integration)
+### Task 23: HarnessCore main loop (integration) ✅ DONE (1632c54, +7b7dbe4)
 
 **Files:**
 - Create: `aegiscode/loop/harness.py`, `tests/loop/test_harness.py`, **`tests/helpers.py`** (the shared test factory; Step 1 imports `make_harness` from it, and Tasks 26/27 later extend it with `make_service`/`make_api_client`)

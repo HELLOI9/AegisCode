@@ -173,3 +173,24 @@
 - **两阶段评审**:spec ✅、quality Approved。1 Important 归一化尾斜杠(否则 "src" 会误匹配 "src_evil/x.py")在 ff13ed5 修 + 回归测试证 "src" 归一化后拒 src_evil/。
 - **人工干预**:控制器编写此非编号任务的 spec 文本(基于 M2 tracked 条件);手动补丁 write_allowlist_dirs 归一化(单行、fail-safe、单文件);其余产出由 subagent 完成。
 - **PolicyEngine.rules=[]**:所有治理经 default_fn。留 seam 供未来自定义 PolicyRule。
+
+### Task 23 · HarnessCore 主循环(集成)— ✅ 完成 (1632c54, +7b7dbe4)
+- **技能**:subagent-driven-development;实现 sonnet(中途 API JSON 解析错误,续传完成);评审 sonnet;修复 sonnet 含控制器手工检查 spec §6 + 确认 FINISH_REJECTED 语义。
+- **TDD**:RED = 模块不存在(tests/helpers.py + tests/loop/test_harness.py import harness);GREEN = 两个 demo 测试 +3 修复测试,make test 150 passed。
+- **产物**:
+  - aegiscode/loop/harness.py — HarnessCore 类。自研 while 循环(无 Agent SDK)。逐轮: build_context → llm.complete (retry llm_max_retries=3 from config) → parse_action (fail→INVALID_ACTION 反馈+审计+计数→ decide_termination) → audit ACTION_PROPOSED → progress check → dispatch → audit GOVERNANCE_DECISION → 按 verdict 分支:
+    - DENY → audit FEEDBACK(POLICY_DENIED) +consecutive_failures +step continue(无 TOOL_EXECUTED)。
+    - REQUIRE_APPROVAL → approval_resolver → approve: execute_approved (含路径护栏); reject: APPROVAL_REJECTED 反馈。
+    - ALLOW/ALLOW_WITH_AUDIT → audit TOOL_EXECUTED → classify feedback → progress 计数。
+    - finish → final_verifier(): pass → COMPLETED(唯一终止); fail → FINISH_REJECTED feedback, continue(撞上限转 MAX_STEPS per SPEC §6)。
+  - aegiscode/governance/dispatcher.py 增 execute_approved(路径护栏+工具执行)。
+  - aegiscode/config/schema.py Limits 增 llm_max_retries=3。
+  - tests/helpers.py (make_harness 工厂,MockLLM+真治理+spy 审计/工具)。tests/loop/test_harness.py (demo1+demo2+finish_rejected_continues+deny_no_tool_executed 等)。
+- **两阶段评审**:spec PARTIAL/质量 Needs Fixes(见下)。
+  - Critical:DENY 路径错误地审计了 TOOL_EXECUTED(从未执行的动作)。
+  - Important/安全:execute_approved 未检路径护栏(已审批不等于绕过工作区边界)。
+  - SPEC 偏差:FINISH_REJECTED 曾直接返回终止(§6 要求回灌继续)。
+  - Config 耦合:llm_max_retries 硬编码 3(已改读配置)。
+  - 以上四项在 7b7dbe4 全修,150 passed 纯净。
+- **人工干预**:控制器发现 subagent API 错误,检查磁盘产物,确认可续;亲读 §6 +dispatcher 确认 FINISH_REJECTED 语义为"反馈继续"而非"终止";在修复工单中注入这一条;其余由续传 subagent 完成。
+- **MockLLM 离线确定性**:全部 demo 测试用 scripted MockLLM,零网络/零真 LLM。
