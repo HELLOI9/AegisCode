@@ -2740,7 +2740,7 @@ git commit -m "feat: Dockerfile (runtime key injection, /workspace mount)"
 
 ---
 
-### Task 31: Mechanism demos (§A.6, four demos)
+### Task 31: Mechanism demos (§A.6, four demos) ✅ DONE (dc8c313, +091440c, +78d4d9f)
 
 **Files:**
 - Create: `demos/demo1_dangerous_denied.py`, `demos/demo2_feedback_loop.py`, `demos/demo3_symlink_escape.py`, `demos/demo4_superseded.py`, `tests/demos/test_demos.py`; Modify: `aegiscode/cli.py` (`demo` runs all four)
