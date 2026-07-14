@@ -1760,7 +1760,7 @@ git commit -m "feat: run_tests sensor (fixed command) + finish control tool"
 
 ## Milestone 3 — Feedback, Audit, Memory
 
-### Task 18: Feedback classifier + pytest parser + no-progress fingerprint
+### Task 18: Feedback classifier + pytest parser + no-progress fingerprint ✅ DONE (c0df597, +422f0f8)
 
 **Files:**
 - Create: `aegiscode/feedback/__init__.py`, `aegiscode/feedback/classifier.py`, `aegiscode/feedback/pytest_parser.py`, `tests/feedback/test_classifier.py`
@@ -1844,7 +1844,7 @@ git commit -m "feat: feedback classifier + pytest summarizer + no-progress track
 
 ---
 
-### Task 19: Audit events + SHA256 hash chain + verify_chain
+### Task 19: Audit events + SHA256 hash chain + verify_chain ✅ DONE (af405cf, +8c36acb, +7f1477d)
 
 **Files:**
 - Create: `aegiscode/audit/__init__.py`, `aegiscode/audit/events.py`, `aegiscode/audit/chain.py`, `tests/audit/test_chain.py`
@@ -1950,7 +1950,7 @@ git commit -m "feat: audit events + SHA256 hash chain + verify_chain tamper dete
 
 ---
 
-### Task 20: Memory store (write-with-redaction + filtered retrieval)
+### Task 20: Memory store (write-with-redaction + filtered retrieval) ✅ DONE (738ad8a, +ce70499)
 
 **Files:**
 - Create: `aegiscode/memory/__init__.py`, `aegiscode/memory/store.py`, `tests/memory/test_store.py`
@@ -2051,7 +2051,7 @@ git commit -m "feat: memory store (secret-refusing write, filtered retrieval, ag
 
 ---
 
-### Task 21: Context builder (6-tier budget + deterministic summarize)
+### Task 21: Context builder (6-tier budget + deterministic summarize) ✅ DONE (932e893, +b633118); M3 final-review fixes in e529ea8
 
 **Files:**
 - Create: `aegiscode/memory/context_builder.py`, `tests/memory/test_context_builder.py`
@@ -2422,7 +2422,7 @@ git commit -m "feat: credential store keyring/.env/env, fail-safe, masked status
 
 ---
 
-### Task 25: Self-written secret scanner
+### Task 25: Self-written secret scanner ✅ DONE (b39c3ca, +f271fd7)
 
 **Files:**
 - Create: `aegiscode/credentials/scanner.py`, `tests/credentials/test_scanner.py`
