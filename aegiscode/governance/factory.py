@@ -27,7 +27,10 @@ def build_default_fn(config) -> Callable:
     # Snapshot config values at build time so the closure is self-contained.
     command_allowlist = list(config.governance.command_allowlist)
     command_rules = [r.model_dump() for r in config.governance.command_rules]
-    write_allowlist_dirs = list(config.governance.write_allowlist_dirs)
+    # Normalize: ensure every entry ends with "/" so "src" can't match "src_evil/".
+    write_allowlist_dirs = [
+        d if d.endswith("/") else d + "/" for d in config.governance.write_allowlist_dirs
+    ]
     default_decisions = config.governance.default_decisions
 
     def _default_fn(action, ctx) -> GovernanceVerdict:

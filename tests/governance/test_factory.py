@@ -267,3 +267,18 @@ def test_dispatch_read_file_allows_and_executes(tmp_path):
     assert verdict.decision == Decision.ALLOW
     assert result is not None and result.status == "success"
     assert spy.executed != []
+
+
+def test_write_allowlist_dir_without_trailing_slash_normalized():
+    """Ensure an entry like 'src' (no slash) doesn't match 'src_evil/x.py'."""
+    cfg = AegisConfig(governance={"write_allowlist_dirs": ["src"]})  # no trailing slash
+    fn = build_default_fn(cfg)
+
+    # "src/file.py" should ALLOW (it's under src/)
+    action_ok = Action(tool="write_file", arguments={"path": "src/file.py", "content": ""})
+    assert fn(action_ok, _ctx()).decision == Decision.ALLOW
+
+    # "src_evil/file.py" must NOT match — normalization appends "/" so startswith("src/")
+    action_bad = Action(tool="write_file", arguments={"path": "src_evil/file.py", "content": ""})
+    v = fn(action_bad, _ctx())
+    assert v.decision != Decision.ALLOW  # should be REQUIRE_APPROVAL (default write tier)
