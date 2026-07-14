@@ -213,3 +213,121 @@ def make_harness(tmp_path, scripted: list[str], final_ok: bool = True,
     )
 
     return harness, spy
+
+
+def make_service(
+    tmp_path,
+    scripted: list[str],
+    final_ok: bool = True,
+    sync: bool = False,
+    fail_first_test: bool = False,
+    approval_decisions: dict | None = None,
+    pre_cancel: bool = False,
+):
+    """Build an ApplicationService wired with MockLLM and a tmp sqlite db.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        pytest fixture; used for both workspace and the sqlite db.
+    scripted : list[str]
+        JSON strings returned by MockLLM, one per LLM call.
+    final_ok : bool
+        Return value of the final_verifier callable (True = finish accepted).
+    sync : bool
+        If True, create_task() runs inline (blocking).
+    fail_first_test : bool
+        Passed to SpyRunTestsTool to simulate a failing test on first call.
+    approval_decisions : dict | None
+        Pre-seeded approval decisions for sync mode.  Use {"*": True} to approve
+        all, {"*": False} to reject all.
+    pre_cancel : bool
+        If True, the cancel flag is set before the harness runs, so the loop
+        immediately returns CANCELLED.
+
+    Returns
+    -------
+    ApplicationService
+        The service stores pre_cancel in create_task's default signature.
+        To exercise pre_cancel, call svc.create_task(workspace, desc, pre_cancel=True).
+        The helper stores it on the service so create_task can pick it up automatically
+        when the test passes pre_cancel=True via this factory.
+
+    Implementation note: the factory injects pre_cancel as a default by monkey-patching
+    create_task is NOT done -- instead we return a thin wrapper that sets pre_cancel
+    on every create_task call when pre_cancel=True.
+    """
+    from aegiscode.loop.harness import HarnessCore
+    from aegiscode.persistence.db import open_db
+    from aegiscode.service.app_service import ApplicationService
+
+    spy = Spy()
+
+    config = AegisConfig(
+        workspace=Workspace(root=str(tmp_path)),
+        limits=Limits(
+            max_steps=20,
+            max_consecutive_failures=5,
+            no_progress_repeat_limit=3,
+            action_retry_limit=3,
+        ),
+    )
+
+    db_path = str(tmp_path / "service.db")
+    conn = open_db(db_path)
+    audit_log = AuditLog(conn)
+
+    registry = _build_registry(spy, fail_first_test)
+    dispatcher = build_dispatcher(config, registry)
+
+    mock_llm = MockLLM(scripted)
+    spy_llm = SpyLLM(mock_llm, spy)
+
+    def final_verifier() -> bool:
+        return final_ok
+
+    def harness_factory(task_id, workspace, approval_resolver=None, cancel_check=None):
+        import os
+
+        def resolve(p: str) -> str:
+            if os.path.isabs(p):
+                return p
+            return os.path.join(workspace, p)
+
+        ctx = SimpleNamespace(
+            task_id=task_id,
+            workspace_root=workspace,
+            resolve=resolve,
+            snapshot=lambda abspath: None,
+            write_max_bytes=config.tools.write_max_bytes,
+        )
+        return HarnessCore(
+            llm=spy_llm,
+            dispatcher=dispatcher,
+            audit=SpyAuditLog(audit_log, spy),
+            config=config,
+            ctx=ctx,
+            final_verifier=final_verifier,
+            approval_resolver=approval_resolver,
+            cancel_check=cancel_check,
+        )
+
+    svc = ApplicationService(
+        db=conn,
+        db_path=db_path,
+        config=config,
+        harness_factory=harness_factory,
+        sync=sync,
+        approval_decisions=approval_decisions,
+    )
+
+    if pre_cancel:
+        # Wrap create_task to always pass pre_cancel=True
+        _orig_create_task = svc.create_task
+
+        def _create_task_with_cancel(workspace, description, **kwargs):
+            return _orig_create_task(workspace, description, pre_cancel=True, **kwargs)
+
+        svc.create_task = _create_task_with_cancel
+
+    return svc
