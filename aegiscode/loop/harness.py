@@ -31,6 +31,8 @@ class HarnessCore:
         final_verifier,
         approval_resolver=None,
         cancel_check=None,
+        memory_store=None,
+        project_id=None,
     ):
         self.llm = llm
         self.dispatcher = dispatcher
@@ -39,6 +41,13 @@ class HarnessCore:
         self.ctx = ctx
         self.final_verifier = final_verifier
         self.approval_resolver = approval_resolver
+        # Optional memory read-path. When memory_store is provided (with a
+        # project_id scope), _build retrieves project memories and feeds the
+        # governance-usable ones into the MEMORY tier of build_context. Default
+        # None keeps every existing HarnessCore(...) construction working with
+        # an empty MEMORY tier (back-compat).
+        self.memory_store = memory_store
+        self.project_id = project_id
         # Optional cooperative-cancellation hook: () -> bool. When it returns
         # True at the top of a turn, the loop stops with CANCELLED. This is the
         # seam T26 ApplicationService uses to cancel a running task.
@@ -316,11 +325,27 @@ class HarnessCore:
             task=task,
             recent_steps=recent_steps,
             last_feedback=last_feedback,
-            # TODO(memory-integration): retrieve project memories and honor
-            # is_governance_usable() per row (M3 carry-in) before feeding to context.
-            memories=[],
+            memories=self._retrieve_memories(),
             budget_chars=self.config.memory.context_budget_chars,
         )
+
+    def _retrieve_memories(self) -> list[dict]:
+        """Retrieve project memories for the MEMORY context tier.
+
+        Returns [] when no memory store is wired (back-compat) or no project
+        scope is set. Otherwise retrieves the top-k rows for this project and
+        filters out any row that is NOT governance-usable. Per SPEC §M10, an
+        agent-sourced memory (source=agent, confirmed=false) is 仅提示、永不作
+        治理依据 ("hint only, never a governance basis") — so it is excluded from
+        the context fed to the LLM. Retrieval is deterministic (ORDER BY
+        last_used_at DESC in the store); no network / wall-clock branching here.
+        """
+        if self.memory_store is None or self.project_id is None:
+            return []
+        rows = self.memory_store.retrieve(
+            self.project_id, top_k=self.config.memory.retrieval_top_k
+        )
+        return [r for r in rows if self.memory_store.is_governance_usable(r)]
 
     def _complete_with_retry(self, messages: list[dict]) -> str:
         """Call the LLM with up to *llm_max_retries* attempts on transient errors."""

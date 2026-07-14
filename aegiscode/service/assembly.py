@@ -15,8 +15,9 @@ from aegiscode.audit.chain import AuditLog
 from aegiscode.governance.factory import build_dispatcher
 from aegiscode.llm.mock import MockLLM
 from aegiscode.loop.harness import HarnessCore
+from aegiscode.memory.store import MemoryStore
 from aegiscode.persistence.db import open_db
-from aegiscode.service.app_service import ApplicationService
+from aegiscode.service.app_service import ApplicationService, _workspace_hash
 from aegiscode.tools.command_tool import RunCommandTool
 from aegiscode.tools.file_tools import (
     ListFilesTool,
@@ -138,6 +139,7 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
         If a real provider is selected but no key is configured.
     """
     conn = open_db(db_path)
+    memory_store = MemoryStore(conn)
     registry = _build_registry(config)
     dispatcher = build_dispatcher(config, registry)
     llm = build_llm(config, credential_store)
@@ -170,6 +172,10 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
             final_verifier=_make_final_verifier(config, workspace),
             approval_resolver=approval_resolver,
             cancel_check=cancel_check,
+            memory_store=memory_store,
+            # Stable per-workspace project scope: same hash the task repo uses
+            # (app_service._workspace_hash), so retrieved memory is per project.
+            project_id=_workspace_hash(workspace),
         )
 
     return ApplicationService(
