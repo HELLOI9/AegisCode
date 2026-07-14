@@ -74,3 +74,19 @@ class Dispatcher:
 
         # ALLOW or ALLOW_WITH_AUDIT — execute.
         return (verdict, tool.run(action.arguments, ctx))
+
+    def execute_approved(self, action, ctx):
+        """Bypass the governance gate and directly execute an already-approved action.
+
+        Used after REQUIRE_APPROVAL has been resolved in favour of approval.
+        Returns ToolResult from the tool's run method.
+        """
+        tool = self.registry.get(action.tool)
+        if tool is None:
+            return ToolResult(
+                tool=action.tool,
+                status="error",
+                category="INVALID_ACTION",
+                summary=f"unknown tool {action.tool}",
+            )
+        return tool.run(action.arguments, ctx)
