@@ -163,3 +163,13 @@
 - **产物**:aegiscode/loop/{__init__,termination.py}。TerminationReason(str,Enum) 9 值;LoopCounters(step/consecutive_failures/invalid_actions/no_progress_hits);decide_termination 计数档优先级 INVALID_ACTION_LIMIT>CONSECUTIVE_FAILURES>NO_PROGRESS>MAX_STEPS,健康返回 None;非计数档(COMPLETED/FINISH_REJECTED/LLM_ERROR/INTERNAL_ERROR/CANCELLED)由主循环直接设置。
 - **两阶段评审**:spec ✅、quality Approved。2 Minor(缺返回注解、无同时触限的优先级测试)在 69867d7 修复 + 优先级测试,126 passed。
 - **人工干预**:控制器补返回注解与优先级断言(证计数档优先级不变量)。注:此 task 的 fix/PLAN/log 曾因工具输出中断丢失,恢复工具后重做并核实真实提交状态,未重复已完成实现。
+
+### Governance factory · M2/M3 遗留装配硬性条件 — ✅ 完成 (11c5bea, +ff13ed5)
+- **技能**:subagent-driven-development;实现/评审 sonnet;人工补丁一处(尾斜杠归一化)。
+- **背景**:M2 最终评审判定并非活漏洞而是装配缝隙,defer 到 M4,并列为硬性 M4 前置。此为本项落地。
+- **TDD**:RED = 模块不存在;GREEN = 18 新测试,144 total;补 1 归一化回归测试后 19/145。
+- **产物**:aegiscode/governance/factory.py。4 个构建器:build_default_fn(config)/build_engine(config)/build_path_config(config)/build_dispatcher(config, registry)。default_fn 分档:run_command→judge_command(动态);finish→ALLOW(TIER_FINISH);readonly {read_file,list_files,search_text}→default_decisions.readonly(TIER_READONLY);write_file→在 write_allowlist_dirs 前缀内→ALLOW(TIER_WRITE_ALLOWLISTED),否则→default_decisions.write(TIER_WRITE);兜底→default_decisions.command(TIER_DEFAULT,fail-closed 默认 DENY)。命令走 judge_command 全流水线保留 甲(1-4)。
+- **M2 硬性 2 集成测试**:test_dispatch_rm_rf_denied_no_exec(甲 → DENY,spy.executed==[]);test_dispatch_write_outside_allowlist_requires_approval(write_file→REQUIRE_APPROVAL,result=None,spy.executed==[])。两条 no-exec 由 spy 工具证实。
+- **两阶段评审**:spec ✅、quality Approved。1 Important 归一化尾斜杠(否则 "src" 会误匹配 "src_evil/x.py")在 ff13ed5 修 + 回归测试证 "src" 归一化后拒 src_evil/。
+- **人工干预**:控制器编写此非编号任务的 spec 文本(基于 M2 tracked 条件);手动补丁 write_allowlist_dirs 归一化(单行、fail-safe、单文件);其余产出由 subagent 完成。
+- **PolicyEngine.rules=[]**:所有治理经 default_fn。留 seam 供未来自定义 PolicyRule。
