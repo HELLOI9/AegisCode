@@ -220,3 +220,63 @@
 - **人工干预**:控制器在评审前用 python3 -c 复现短 key 掩码泄漏(set_key('xy')→'xy…xy'),将其作为重点交给评审并要求测试改为断言 '***' 而非弱断言;确认真 OpenAI key(~51 字符)不受影响但安全组件不应泄漏任何短密钥。
 - **验证**:xy/sk-1234→'***';sk-12345→'sk-…2345';sk-abcdef1234567890→'sk-…7890';全部 leak=False。
 - 下一步:PR + merge;之后 Milestone 6(服务/接口:T26 ApplicationService → T27 FastAPI → T28 WebUI / T29 CLI)。
+
+---
+
+## 2026-07-14 · Milestone 6(服务/接口)— 新 worktree
+**Worktree**:`.claude/worktrees/m6-service-interface`,分支同名(base = main @ cc5d867,M0-M5 已并入)。基线 make test = 165。链:T26 ApplicationService(+repositories)→ T27 FastAPI(8 端点)→ T29 CLI;T28 WebUI 依赖 T27。实现/评审 sonnet,最终评审 opus。每任务扩展 tests/helpers.py(T26 加 make_service,T27 加 make_api_client)。
+
+### Task 26 · ApplicationService(创建/查询/审批/取消 + 持久化)— ✅ 完成 (f4ee46c, +ce96821)
+- **技能**:subagent-driven-development;实现/评审 sonnet。
+- **TDD**:RED = 模块不存在;GREEN = 15 新测试,180 total;修复后 +2 async 测试,182 total 纯净。
+- **产物**:aegiscode/service/app_service.py + aegiscode/persistence/repositories.py + tests/helpers.py 加 make_service(sync 参数)。ApplicationService(db, db_path, config, harness_factory, sync=False):create_task(uuid,插 RUNNING 行,sync 内联/否则后台线程,跑 HarnessCore,按 TerminationReason 更新 COMPLETED/CANCELLED/FAILED)/get_task/get_events(since 严格 >N)/list_approvals/decide(approval_id,approved)/cancel/get_audit(verify_chain 元组解包 → chain_valid)。step 行由 run 后投影 audit_events(HarnessCore 未改)。参数化 SQL 无注入,schema.sql 未动。
+- **审批暂停/持久化/恢复(T23 遗留 seam 落地)**:REQUIRE_APPROVAL → 插 PENDING approval_requests 行 → 暂停 → decide() 更新状态并唤醒 → resolver 返回 approved → 循环 execute_approved。sync 模式用注入的 sync_decision_fn 确定性判定;async 用 threading.Event。
+- **两阶段评审**:spec ✅、quality Approved-with-caveats。
+  - Important:async resolver 存在 lost-wakeup 窗口(先插行后注册 Event,decide 可能错过)+ ev.wait 无超时(永久挂起)。修:_approvals_lock 保护;Event 先于插行注册;ev.wait 有界超时(approval_timeout_sec 或 3600s)超时 fail-closed → REJECTED;唤醒后重读 DB 状态。
+  - Important:make_service async 路径 AuditLog 仍包主线程连接(跨线程 sqlite 误用)。修:harness_factory 接 audit_conn,async 传 thread_conn,sync 传主连接。
+  - Minor:approval 行 step_index 硬编码 0。修:AuditEventRepository.latest_action_step_index 取真实 ACTION_PROPOSED step。
+  - Minor:approval_decisions 泄漏到生产构造函数。修:移除,改注入 sync_decision_fn(测试作用域)。
+  - ce96821 合修四项 + 2 async 测试(pause/resume 跨线程 + decide-before-wait 仍唤醒),async 测试 5s 硬上限轮询跑 5 次零 flaky。
+- **人工干预**:控制器判定 async 路径 bug 虽 M6 测试不触发但 T27 API 会以 async 驱动,升级为 must-fix(而非 defer);要求补真实跨线程 pause/resume 测试并加硬超时防 CI 挂起。
+- **安全**:参数化 SQL;后台线程各开自己的 DB 连接。
+
+### Task 27 · FastAPI REST(8 端点)— ✅ 完成 (b622087, +2781e8a)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet。
+- **TDD**:RED = api.py 不存在,21 测试全红;GREEN = 实现后 21/21 绿,203 total。polish 后 22 测试、204 total、ruff 干净、全离线(MockLLM + tmp sqlite,`sync=True`)。
+- **产物**:`aegiscode/service/api.py` — `build_app(service, credential_store=None) -> FastAPI`,8 端点(SPEC §13 M13):POST /tasks · GET /tasks/{id} · GET /tasks/{id}/events?since=N · GET /tasks/{id}/approvals · POST /approvals/{id}/decision · POST /tasks/{id}/cancel · GET /tasks/{id}/audit · GET /credentials/status。未知 task 走 HTTPException 404;decide/cancel 对未知 id 返回 200 no-op(与 ApplicationService 语义一致)。`tests/helpers.py` 加 `make_api_client`(TestClient over build_app,sync=True service),供 T28 复用。
+- **安全**:API 无鉴权、仅 localhost — 模块 docstring 明确警告不得暴露到公网。`/credentials/status` 仅回显 masked,永不明文(专门的明文泄漏测试)。全局 `@app.exception_handler(Exception)` → 通用 500 `{"detail":"internal error"}`,服务端记日志,响应体不泄漏 traceback/db 路径/config(注入 `sqlite3.OperationalError("SECRET_DB_PATH=...")` 的真实泄漏测试断言无 `Traceback`/`OperationalError`/`SECRET_DB_PATH`)。
+- **polish(2781e8a)**:db.py 加 `check_same_thread=False` 的 doc 注释(Starlette 线程池路由同步端点必需;WAL+autocommit + 后台线程各开自己连接,单用户 localhost 下安全);清理 credential-leak 测试残留的复制粘贴断言;移除未用 `import pytest`。确认 pyproject filterwarnings 路径 `starlette.exceptions.StarletteDeprecationWarning` 为正规模块(`__module__` 实测),且该类非 `DeprecationWarning` 子类,`error::DeprecationWarning` 本不会升级它。
+- **两阶段评审**:Stage1 SPEC 合规 ✅(8 端点齐全、masked-only、404 语义、错误不泄漏、离线确定性);Stage2 质量 — 0 Critical / 0 Important。Minor:默认 null-store 在真实 env key 存在时仍报 configured=False(fail-safe,不泄漏,建议 T28 入口注入真实 store);cancel/decide 端点测试薄但诚实(sync 下任务已完成,真实行为由服务层测试覆盖);report 计数漂移 21→22。均不阻塞。
+- **人工干预**:控制器补跑正式两阶段评审(前次仅有 report 无 review),确认 filterwarnings 路径实为正确(推翻上下文中"路径错误"的假设);移除未用 import 使 ruff 干净。
+
+### Task 28 · WebUI(原生 静态 + 轮询)— ✅ 完成 (84cd1b2, +a4db1c2, +3bfa682)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet,fix sonnet。
+- **TDD**:RED = `/`、`/app.js`、`/style.css` 未挂载,5 红 1 绿;GREEN = 挂载后 6/6 绿,210 total;diff 修复后 +3 测试,213 total;kernel F841 清理后仍 213 绿、ruff 干净。全离线(TestClient over MockLLM service)。
+- **产物**:`aegiscode/service/webui/{index.html,app.js,style.css}`(原生 HTML/CSS/JS,无框架/CDN/构建步骤)+ `aegiscode/service/api.py` 加 3 条显式 `FileResponse` 路由(`GET /` → text/html、`/app.js` → application/javascript、`/style.css` → text/css;`Path(__file__).parent/"webui"` 定位,CWD 无关,不与 8 个 JSON 端点冲突)。单页:workspace+描述→`POST /tasks`;`setInterval` 1500ms 轮询 `events?since=<水位>`(水位取 max event_id,严格 `event_id > since` 无 off-by-one)、approvals、task;审批面板 approve/reject → `POST /approvals/{id}/decision`;审计 Verify-chain → `GET /audit` 显示 `chain_valid`;终态(COMPLETED/FAILED/CANCELLED)停止轮询。`tests/service/test_webui_served.py` 6→ 后续 +1 = 相关测试。
+- **安全 / XSS**:所有服务端字符串经 `textContent`/`JSON.stringify` 注入,`innerHTML` 仅用于 `= ""` 清空 → 恶意 workspace 路径/任务描述不被解释为 HTML。凭据指示仅消费 `/credentials/status`(masked),无新增明文面;无新增鉴权面(仅静态资源路由,localhost-only 姿态不变)。
+- **两阶段评审**:Stage1 SPEC 合规 — 资产服务、字段名与 schema 全对齐、水位正确、轮询无泄漏、native-only、masked-only 均 PASS。Stage2 质量 — 0 Critical。**1 Important**:`renderDiff` 为死代码 / 未满足 SPEC §13「diff 必做」— TOOL_EXECUTED 审计 payload 仅 `{tool,status}`,丢弃 `result.artifacts`,故 changed_files 永不到达 UI。Minor:poll 无重入守卫(localhost 单用户无害)、brief 提及的 README 手测步骤未写、step_count 运行中显示 0。
+- **Important 修复(a4db1c2,TDD)**:harness.py 在 TOOL_EXECUTED 追加 `changed_files`(仅当 `result.artifacts.get("changed_files")` 真值时,写工具有、run_tests/finish 无噪声键);payload 经 `redact` + 哈希,不改 schema/哈希/脱敏;`verify_chain` 不受影响(哈希动态计算无 golden)。app.js `renderDiff` 改为读 `payload.changed_files`,非空数组时渲染「changed files (N)」列表,逐条经 `textContent`(XSS 安全)。+2 harness 测试(写工具有键 / 只读工具无键)+ 1 WebUI 测试(app.js 含 changed-files 渲染逻辑)。全文本快照 diff 仍延后至 v2(SPEC line 113 写前快照 = SHOULD)。
+- **人工干预**:控制器核实 Important 属实(SPEC §13 line 257「diff 必做」),判定为在范围内的 v1 合规缺口而非可延后项 → 派 fix subagent 以 TDD 打通 artifacts→审计→WebUI 数据链;另清理 kernel 预存 F841(harness.py:79 未用 `exc` 绑定,3bfa682)使治理内核 ruff 干净。
+
+### Task 29 · CLI(init/run/serve/config/key/demo)+ 生产装配 + 凭据后端 — ✅ 完成 (95863ad, +09f1420)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet,修复 sonnet。
+- **TDD**:RED = `aegiscode.cli` 不存在;GREEN = 13 CLI 测试绿,226 total;评审修复后 +5 测试,231 total,ruff 干净,全离线(MockLLM + 猴补 uvicorn.run,零网络零绑定)。
+- **产物**:
+  - `aegiscode/cli.py` — `main(argv) -> int` argparse 分发六子命令。`init` 脚手架 aegis.yaml(往返有效);`config` 校验+打印,ConfigError/OSError → rc=2;`key set|status|clear`(set 用 getpass,永不回显明文;status 复用 `CredentialStore.status()` 掩码);`run --workspace --task [--watch]`(sync=True 保证进程退出前到终态);`serve`(sync=False 后台线程,localhost-only);`demo`(最小 MockLLM 零网络治理 DENY 演示,非 T31 四演示套件)。
+  - `aegiscode/service/assembly.py` — **全系统首次真实装配**:`build_service(config, credential_store, db_path, sync)` + `build_llm(config, key)`(mock/openai/anthropic 分发,无 key → NoKeyError → CLI 友好非零退出)+ 真实 `ToolRegistry`(仅 `config.tools.enabled`)+ 真实 dispatcher + 真实 `final_verifier`(复跑反馈命令,COMPLETED 由验证器绿而非 LLM 声称)。`harness_factory` 五参签名与 ApplicationService 两处调用点精确匹配;跨线程 sqlite 干净(async 各开自己连接,audit 建在 audit_conn 上)。
+  - `aegiscode/credentials/backend.py` — `build_credential_store(env)`:AEGIS_HOME → JSON 文件后端(测试可 hermetic + keyring 不可用降级),否则 keyring(`except Exception` 降级到 `~/.aegiscode` JSON)。复用 CredentialStore 掩码。
+- **两阶段评审**:Stage1 SPEC 合规 — 六子命令齐全、key 不泄漏明文、自实现 harness(无 SDK)、离线确定性 均 PASS。Stage2 质量 — **1 Critical + 2 Important**,已全部修复:
+  - **C1(CRITICAL,治理主场维度)**:路径围栏锚定 `config.workspace.root`(dispatcher 构建时冻结,默认 `/workspace`)而非每任务 `ctx.workspace_root`。测试中两者相等故未暴露;主机 `run --workspace X` / `serve`(每请求 workspace)路径下两者发散 → 工位内 `report.txt → .env` 软链绕过围栏(**回退了 b48f4a9 的软链修复**)。修:`dispatch()` 与 `execute_approved()` 均改 `root = getattr(ctx,'workspace_root',None) or pc.workspace_root`,`path_fence.py` 算法未动。**控制器独立复现**:发散根 + 工位内软链 → 修复后 DENY/PATH_FENCE、status=denied、secret 未泄漏(非测试戏法)。
+  - **I1**:凭据文件 chmod-after-write 存在 world-readable 窗口。修:`os.open(path, O_WRONLY|O_CREAT|O_TRUNC, 0o600)` 创建即受限。
+  - **I2**:凭据父目录 world-traversable。修:`os.makedirs(d, mode=0o700, exist_ok=True)` + 兜底 chmod。
+  - Minor(未阻塞):`serve --host 0.0.0.0` 仍显示 localhost 横幅未告警;init 写文件后 load_config 未 guard(模板恒有效不可触发);test 双读 capsys;demo ctx 省略 snapshot/write_max_bytes(DENY 早于执行,无害)。
+- **人工干预**:控制器判定 C1 为真实治理回退(非误报),要求以「围栏锚定 ctx.workspace_root」的架构正确方案(同时修 run+serve)而非仅 CLI 层对齐 config;修复后独立复现确认 secret 不泄漏;折叠 I1/I2 凭据权限修复入同一修复轮。
+
+### Milestone 6 · 最终整支评审(opus)+ I-1/I-2 硬化 — ✅ APPROVED (merge OK)
+- **范围**:14 commits,+3192 行(service/interface 层)。全量 231→233。ruff:M6 新增/触碰的文件 0 error(仅 pre-existing 非 M6 文件有 E401/E701 风格债)。
+- **SPEC 合规复核(全 PASS)**:§12 自实现主循环无 Agent SDK(grep langchain/autogen/crewai/… 皆无;assembly 直接装配 HarnessCore);§A.4C 离线可测(tests 无 requests/urllib/socket/httpx;serve 测试 monkeypatch uvicorn.run;openai 无 key 在 build_llm 提前 NoKeyError);§13 八端点齐全且命名精确、/credentials/status 仅 {configured,masked}、WebUI 必做集齐(启动+事件流+审批+diff+最终态+审计/verify);C1 围栏修复两处调用点均 ctx.workspace_root 且 run/serve 双路径生效;changed_files 加法式入 TOOL_EXECUTED payload,经 redact+SHA256,verify_chain 确定性不破;凭据 os.open(0o600) 创建期即受限 + makedirs(0o700),getpass 不回显。
+- **0 Critical**。集成检查全绿:harness_factory 签名两处调用点一致;跨线程 sqlite 各开连接不共享;WebUI 字段与仓储行形状全对齐;diff 端到端非死代码;demo 真实拦截 rm -rf / (executed count==0);500 handler 不泄漏。
+- **I-1(Important,已修 553873d)**:open_db 无 PRAGMA busy_timeout → async 模式后台线程写 audit 与主线程 decide() UPDATE approval 撞写,WAL 单写者下 SQLITE_BUSY 立即抛错 → 审批决定被静默丢弃(行留 PENDING 直到 resolver fail-close,最坏挂 1h)。修:busy_timeout=5000,第二写者等亚毫秒锁而非报错。serve/审批路径正确性修复。
+- **I-2(Important,已修 46874b6)**:async pause/resume 从未经 API 层测试(所有 API 测试 sync=True)——正是掩盖 I-1 的集成缺口。补:make_async_api_client(sync=False)+ 两条 HTTP 端到端测试(approve → COMPLETED + 行 APPROVED + chain_valid;reject → 副作用断言 secret.txt 永不落盘 + 行 REJECTED),_poll_http 5s 硬上限防挂。RED 揭示真实行为事实:reject 的写被拒但循环仍可 finish(治理拒的是动作非整轮),故 reject 断言改用确定性副作用。
+- **人工干预**:控制器将 I-1/I-2 从"fast-follow 建议"升级为合并前必修(理由:两者都落在本里程碑主推的 serve async 审批路径,且 AegisCode 以审批正确性为卖点);I-1 一行内核修复由控制器直接落地并加 doc 注释,I-2 派 subagent 补 API 层回归测试(同时守护 I-1)。
+- **Minor(未阻塞,记录留待清理)**:test_app_service 若干 vacuous 断言(state in 全集 / step_count>=0;机制实为别处严格断言覆盖);redact 未传 workspace_root(绝对路径相对化分支未启用,当前工具皆相对路径无泄漏);test_run_openai 双调 capsys.readouterr()。

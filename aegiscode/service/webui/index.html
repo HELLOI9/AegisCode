@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AegisCode Local Panel</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>AegisCode Local Panel</h1>
+    <div id="cred-status" class="cred-status" title="Credential status">credentials: …</div>
+  </header>
+
+  <main>
+    <section id="start-section" class="card">
+      <h2>Start a task</h2>
+      <form id="start-form" autocomplete="off">
+        <label for="workspace">Workspace path</label>
+        <input id="workspace" name="workspace" type="text" placeholder="/path/to/workspace" required />
+
+        <label for="description">Task description</label>
+        <textarea id="description" name="description" rows="3" placeholder="Describe the task…" required></textarea>
+
+        <button id="start-btn" type="submit">Start</button>
+        <span id="task-id-label" class="muted"></span>
+      </form>
+    </section>
+
+    <section id="state-section" class="card hidden">
+      <h2>State</h2>
+      <div id="state-banner" class="banner">—</div>
+      <div id="state-detail" class="muted"></div>
+    </section>
+
+    <section id="approvals-section" class="card hidden">
+      <h2>Pending approvals</h2>
+      <div id="approvals-list"></div>
+    </section>
+
+    <section id="events-section" class="card hidden">
+      <h2>Event stream</h2>
+      <div id="events-list" class="events"></div>
+    </section>
+
+    <section id="audit-section" class="card hidden">
+      <h2>Audit</h2>
+      <button id="verify-btn" type="button">Verify chain</button>
+      <span id="chain-valid" class="muted"></span>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

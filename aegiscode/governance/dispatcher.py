@@ -28,9 +28,16 @@ class Dispatcher:
 
         # Path fence: run before policy engine for all file tools that carry a path arg.
         if action.tool in _FILE_TOOLS and "path" in action.arguments:
+            # Anchor the fence to the workspace the tool ACTUALLY runs in
+            # (per-task ctx.workspace_root). config.workspace.root is frozen at
+            # build time and diverges from the real workspace on host `run
+            # --workspace` and on `serve`; using it would fence a nonexistent
+            # path and miss in-workspace symlinks to sensitive files. Fall back
+            # to pc.workspace_root when ctx carries no workspace_root.
+            root = getattr(ctx, "workspace_root", None) or self.pc.workspace_root
             pv = check_path(
                 action.arguments["path"],
-                self.pc.workspace_root,
+                root,
                 self.pc.sensitive_patterns,
             )
             if not pv.allowed:
@@ -94,9 +101,10 @@ class Dispatcher:
         # even an approved write must never escape the workspace or touch a
         # sensitive file. Re-check the same fence that dispatch() runs.
         if action.tool in _FILE_TOOLS and "path" in action.arguments:
+            root = getattr(ctx, "workspace_root", None) or self.pc.workspace_root
             pv = check_path(
                 action.arguments["path"],
-                self.pc.workspace_root,
+                root,
                 self.pc.sensitive_patterns,
             )
             if not pv.allowed:

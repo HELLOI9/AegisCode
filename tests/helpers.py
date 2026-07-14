@@ -15,6 +15,57 @@ from aegiscode.tools.registry import ToolRegistry
 from aegiscode.tools.result import ToolResult
 
 
+
+# ---------------------------------------------------------------------------
+# FastAPI test client factory (used by test_api.py and future Task 28)
+# ---------------------------------------------------------------------------
+
+
+def make_api_client(tmp_path, scripted: list, final_ok: bool = True):
+    """Build a fastapi.testclient.TestClient over build_app(service).
+
+    Creates a sync=True ApplicationService (backed by MockLLM + tmp sqlite),
+    wraps it in the FastAPI app returned by build_app(), and returns a
+    TestClient ready to use in tests.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        pytest fixture; workspace root and sqlite db directory.
+    scripted : list[str]
+        JSON tool-call strings fed to MockLLM, one per LLM round.
+    final_ok : bool
+        Return value of the final_verifier (True = COMPLETED).
+    """
+    from fastapi.testclient import TestClient
+    from aegiscode.service.api import build_app
+
+    svc = make_service(tmp_path, scripted=scripted, final_ok=final_ok, sync=True)
+    app = build_app(svc)
+    return TestClient(app)
+
+
+def make_async_api_client(tmp_path, scripted: list, final_ok: bool = True):
+    """Build a TestClient over an ASYNC (sync=False) ApplicationService.
+
+    Unlike make_api_client, the service runs each task on a background thread and
+    approval decisions must arrive through the real POST /approvals/{id}/decision
+    endpoint (which calls service.decide() -> threading.Event wakeup). No
+    sync_decision_fn is wired, so the harness genuinely pauses on a
+    REQUIRE_APPROVAL until an HTTP decision unblocks it.
+
+    Returns (client, service) so tests can also assert directly on the service
+    if needed; nearly all interaction should go through the HTTP client.
+    """
+    from fastapi.testclient import TestClient
+    from aegiscode.service.api import build_app
+
+    svc = make_service(tmp_path, scripted=scripted, final_ok=final_ok, sync=False)
+    app = build_app(svc)
+    return TestClient(app), svc
+
+
+
 class SpyCommandTool:
     """Replaces RunCommandTool in tests — never actually executes, just records."""
     name = "run_command"
@@ -213,3 +264,132 @@ def make_harness(tmp_path, scripted: list[str], final_ok: bool = True,
     )
 
     return harness, spy
+
+
+def make_service(
+    tmp_path,
+    scripted: list[str],
+    final_ok: bool = True,
+    sync: bool = False,
+    fail_first_test: bool = False,
+    approval_decisions: dict | None = None,
+    pre_cancel: bool = False,
+):
+    """Build an ApplicationService wired with MockLLM and a tmp sqlite db.
+
+    Parameters
+    ----------
+    tmp_path : pathlib.Path
+        pytest fixture; used for both workspace and the sqlite db.
+    scripted : list[str]
+        JSON strings returned by MockLLM, one per LLM call.
+    final_ok : bool
+        Return value of the final_verifier callable (True = finish accepted).
+    sync : bool
+        If True, create_task() runs inline (blocking).
+    fail_first_test : bool
+        Passed to SpyRunTestsTool to simulate a failing test on first call.
+    approval_decisions : dict | None
+        Pre-seeded approval decisions for sync mode.  Use {"*": True} to approve
+        all, {"*": False} to reject all.
+    pre_cancel : bool
+        If True, the cancel flag is set before the harness runs, so the loop
+        immediately returns CANCELLED.
+
+    Returns
+    -------
+    ApplicationService
+        The service stores pre_cancel in create_task's default signature.
+        To exercise pre_cancel, call svc.create_task(workspace, desc, pre_cancel=True).
+        The helper stores it on the service so create_task can pick it up automatically
+        when the test passes pre_cancel=True via this factory.
+
+    Implementation note: the factory injects pre_cancel as a default by monkey-patching
+    create_task is NOT done -- instead we return a thin wrapper that sets pre_cancel
+    on every create_task call when pre_cancel=True.
+    """
+    from aegiscode.loop.harness import HarnessCore
+    from aegiscode.persistence.db import open_db
+    from aegiscode.service.app_service import ApplicationService
+
+    spy = Spy()
+
+    config = AegisConfig(
+        workspace=Workspace(root=str(tmp_path)),
+        limits=Limits(
+            max_steps=20,
+            max_consecutive_failures=5,
+            no_progress_repeat_limit=3,
+            action_retry_limit=3,
+        ),
+    )
+
+    db_path = str(tmp_path / "service.db")
+    conn = open_db(db_path)
+
+    registry = _build_registry(spy, fail_first_test)
+    dispatcher = build_dispatcher(config, registry)
+
+    mock_llm = MockLLM(scripted)
+    spy_llm = SpyLLM(mock_llm, spy)
+
+    def final_verifier() -> bool:
+        return final_ok
+
+    def harness_factory(task_id, workspace, approval_resolver=None,
+                        cancel_check=None, audit_conn=None):
+        import os
+
+        def resolve(p: str) -> str:
+            if os.path.isabs(p):
+                return p
+            return os.path.join(workspace, p)
+
+        ctx = SimpleNamespace(
+            task_id=task_id,
+            workspace_root=workspace,
+            resolve=resolve,
+            snapshot=lambda abspath: None,
+            write_max_bytes=config.tools.write_max_bytes,
+        )
+        # Build the AuditLog on the connection owned by the execution thread
+        # (audit_conn); sqlite connections are not shareable across threads.
+        audit_conn = audit_conn if audit_conn is not None else conn
+        audit_log = AuditLog(audit_conn)
+        return HarnessCore(
+            llm=spy_llm,
+            dispatcher=dispatcher,
+            audit=SpyAuditLog(audit_log, spy),
+            config=config,
+            ctx=ctx,
+            final_verifier=final_verifier,
+            approval_resolver=approval_resolver,
+            cancel_check=cancel_check,
+        )
+
+    # Convert the test-only pre-seeded decisions dict into an injected callable
+    # (id -> bool). Keeps the production constructor free of test scaffolding.
+    _decisions = approval_decisions or {}
+
+    def sync_decision_fn(approval_id: str) -> bool:
+        return _decisions.get(approval_id, _decisions.get("*", False))
+
+    svc = ApplicationService(
+        db=conn,
+        db_path=db_path,
+        config=config,
+        harness_factory=harness_factory,
+        sync=sync,
+        sync_decision_fn=sync_decision_fn,
+    )
+
+    if pre_cancel:
+        # Wrap create_task to always pass pre_cancel=True
+        _orig_create_task = svc.create_task
+
+        def _create_task_with_cancel(workspace, description, **kwargs):
+            return _orig_create_task(workspace, description, pre_cancel=True, **kwargs)
+
+        svc.create_task = _create_task_with_cancel
+
+    return svc

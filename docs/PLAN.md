@@ -2497,7 +2497,7 @@ git commit -m "feat: self-written secret scanner (CI + self-check)"
 
 ## Milestone 6 — Service / Interface
 
-### Task 26: ApplicationService (create/query/approve/cancel + persistence)
+### Task 26: ApplicationService (create/query/approve/cancel + persistence) ✅ DONE (f4ee46c, +ce96821)
 
 **Files:**
 - Create: `aegiscode/service/__init__.py`, `aegiscode/service/app_service.py`, `aegiscode/persistence/repositories.py`, `tests/service/test_app_service.py`
@@ -2550,7 +2550,7 @@ git commit -m "feat: ApplicationService + repositories (create/query/approve/aud
 
 ---
 
-### Task 27: FastAPI REST (8 endpoints)
+### Task 27: FastAPI REST (8 endpoints) ✅ DONE (b622087, +2781e8a)
 
 **Files:**
 - Create: `aegiscode/service/api.py`, `tests/service/test_api.py`
@@ -2603,7 +2603,7 @@ git commit -m "feat: FastAPI REST (8 endpoints) over ApplicationService"
 
 ---
 
-### Task 28: WebUI (static, polling)
+### Task 28: WebUI (static, polling) ✅ DONE (84cd1b2, +a4db1c2, +3bfa682)
 
 **Files:**
 - Create: `aegiscode/service/webui/index.html`, `aegiscode/service/webui/app.js`, `aegiscode/service/webui/style.css`; Modify: `aegiscode/service/api.py` (mount static + `GET /`); Test: `tests/service/test_webui_served.py`
@@ -2643,7 +2643,7 @@ git commit -m "feat: native WebUI (polling event stream + approval panel + audit
 
 ---
 
-### Task 29: CLI (init/run/serve/config/key/demo)
+### Task 29: CLI (init/run/serve/config/key/demo) ✅ DONE (95863ad, +09f1420)
 
 **Files:**
 - Create: `aegiscode/cli.py`, `tests/test_cli.py`; Modify: `pyproject.toml` (`[project.scripts] aegiscode = "aegiscode.cli:main"`)
