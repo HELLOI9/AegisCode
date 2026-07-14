@@ -14,7 +14,7 @@ import os
 import sys
 from pathlib import Path
 
-from aegiscode.config.loader import ConfigError, load_config
+from aegiscode.config.loader import ConfigError, load_config, load_defaults
 from aegiscode.config.schema import AegisConfig
 
 _DEFAULT_CONFIG_NAME = "aegis.yaml"
@@ -60,7 +60,11 @@ def _load_config(path: str | None) -> AegisConfig:
     default = Path.cwd() / _DEFAULT_CONFIG_NAME
     if default.exists():
         return load_config(str(default))
-    return AegisConfig()
+    # No config file: still honor the recognized env overrides (e.g.
+    # AEGIS_LLM_PROVIDER=mock) so `serve`/`run` work in a clean/container
+    # environment with no aegis.yaml present. Previously this returned a bare
+    # AegisConfig() and silently dropped the env override.
+    return load_defaults()
 
 
 # --------------------------------------------------------------------------
