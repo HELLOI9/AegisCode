@@ -1,0 +1,20 @@
+# Keep the build context lean and ensure no secrets/cruft are copied in.
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+tests
+docs
+.superpowers
+.claude
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
