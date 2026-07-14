@@ -110,15 +110,55 @@
 - **两阶段评审**:spec ✅、quality Approved。2 Minor:①matcher 异常未捕获(引擎骨架,交 T12 dispatcher 作 try/except 边界)②单规则 ordering 测试不足以证 first-match-wins。②加 2 规则 ordering 测试 3c402ea(52 passed);①carried 到 T12。
 - **人工干预**:控制器决定补 ordering 测试(证治理核心不变量),matcher 异常 carry 到 dispatcher。
 
-### Task 11-17 · 治理其余任务 — ✅ 全部完成
-(逐任务细节见 progress.md 账本;此处记里程碑与最终评审)
-- T11 路径围栏(乙) fd91949 +1cde65e(sibling-prefix)+b48f4a9(符号链接指向敏感文件绕过修复,M2 最终评审发现)
-- T12 受治理分发器 c62f0e0 +e752c54(no-exec spy 断言);含 T10 carried 的 matcher 异常 guard→INTERNAL_ERROR
-- T13 命令词法(甲1-2) 9f1b33c +40bc08c(CRITICAL:glob 注入缺失 + newline + _META 排序修复)
-- T14 命令规则(甲3-4) 85a1905 +839ceac(多token ALL-match 边界);demo① rm -rf→DENY / pip install→APPROVAL 实测通过
-- T15 审批状态机 cedc259 +85f9ad3;fingerprint+validate_resume 背书 demo④ SUPERSEDED
-- T16 run_command 执行器 b64465b;shell=False+argv 确认
-- T17 run_tests 传感器+finish 93d1ca7;修 brief bug t_ok.py→test_ok.py;run_tests 固定命令不可被 arguments 劫持
+> 说明:T11–T17 原为一个塌缩汇总块,现按纪律补全为逐任务详细条目(基于 git 提交 + PLAN + 源码核验重建,非事后杜撰;所有 commit hash、文件、机制均经核对)。
+
+### Task 11 · 路径围栏(乙)— realpath 归属 + 敏感文件黑名单 — ✅ 完成 (fd91949, +1cde65e, +b48f4a9)
+- **产物**:新建 `aegiscode/governance/path_fence.py` + `tests/governance/test_path_fence.py`。`PathVerdict(NamedTuple: allowed:bool, reason:str)` + `check_path(path, workspace_root, sensitive_patterns) -> PathVerdict`。乙的核心机制:先 `realpath(workspace_root)` 冻结根;相对路径 join 到根、绝对路径原样;已存在目标(或本身是 symlink)→ `realpath` 整条解析,新文件 → 只 `realpath` 其**父目录**再拼 basename(否则不存在的路径 realpath 无意义);归属判定一律用 `os.path.commonpath([realpath(target), root]) == root` 而**非字符串前缀**;最后对 basename 做 `fnmatch` + 对路径分段做敏感目录匹配。Linux 语义。
+- **TDD/测试**:RED = 模块不存在。首提 5 测试钉住:symlink→/etc/passwd 越界拒、`../../` 遍历拒、工位内新文件放行、`.env` 敏感拒、工位内绝对路径放行。
+- **评审/修复**:
+  - `1cde65e`(sibling-prefix 不变量):补 `test_sibling_prefix_dir_denied` / `test_traversal_to_sibling_prefix_denied`——`/ws` 与 `/ws-backup` 共享字符串前缀但是不同目录,证明必须用 `commonpath` 判定;若退回字符串 `startswith` 这两测试立刻变红。
+  - `b48f4a9`(**CRITICAL**,M2 最终评审当场发现的符号链接绕过):原实现敏感模式只对**输入路径字符串** `path` 匹配。工位内一个无害命名的软链 `report.txt -> .env`(目标也在工位内)归属检查通过,却能读到 `.env`——黑名单被绕过。修复抽出 `_matches_sensitive(p, patterns)`,对**输入路径 AND 解析后 realpath 两者**都跑敏感匹配(fail-safe 叠加),并补 `test_symlink_to_sensitive_file_inside_workspace_denied` 回归。安全意义:归属通过 ≠ 内容安全,敏感判定必须落在解析后的真实目标上。
+- **安全/SPEC**:落实 SPEC 决策 #13(乙 realpath 先于归属、commonpath 非前缀)。背书 demo ③ symlink escape——越界软链与工位内敏感软链两条路径都被 DENY。
+
+### Task 12 · 受治理分发器 — 把路径围栏 + 默认档接进工具分发 — ✅ 完成 (c62f0e0, +e752c54)
+- **产物**:新建 `aegiscode/governance/dispatcher.py` + `tests/governance/test_dispatcher.py`。`Dispatcher(registry, engine, path_config)`,`dispatch(action, ctx) -> (GovernanceVerdict, ToolResult|None)`。流水序:①未知工具 → `INVALID_ACTION` 结果、不执行;②文件类工具(`read_file/write_file/list_files/search_text`)带 `path` 参数 → 先跑 `check_path`,失败 → `DENY/PATH_FENCE` + `POLICY_DENIED`、不执行;③`engine.evaluate`;④DENY → verdict + `POLICY_DENIED`、不执行;⑤REQUIRE_APPROVAL → verdict + `None`(暂停交主循环);⑥ALLOW/ALLOW_WITH_AUDIT → 执行工具。围栏刻意排在策略引擎之前。
+- **TDD/测试**:RED = 模块不存在。首提含未知工具→`INVALID_ACTION`、路径逃逸在执行前被 DENY,以及承接 T10 的 matcher 异常 guard(见下)。
+- **评审/修复**:
+  - 承接 T10 的健壮性:`engine.evaluate` 被包在 `try/except Exception` 内,任何 matcher 抛异常 → `DENY/INTERNAL_ERROR`,`test_matcher_exception_returns_internal_error` 用会爆的 matcher + spy 工具证明 `executed==[]`——策略代码 bug 也 fail-closed,绝不误放执行。
+  - `e752c54`(no-exec spy 断言):补 `test_deny_from_policy_does_not_execute` 与 `test_require_approval_does_not_execute`,各用记录调用的 SpyTool 断言 DENY 与 REQUIRE_APPROVAL 两条路径 `executed == []`。把"判决即拦截、判决前工具零副作用"钉成不变量。
+- **安全/SPEC**:确立 dispatcher 在 DENY / REQUIRE_APPROVAL / 围栏失败 / matcher 异常四种情形全部 no-exec 气密。是三演示共同的执行边界。
+
+### Task 13 · 命令词法 + 结构安全层(甲,层 1–2)— ✅ 完成 (9f1b33c, +40bc08c)
+- **产物**:新建 `aegiscode/governance/command_lexer.py` + `tests/governance/test_command_lexer.py`。`LexResult(NamedTuple: ok, argv, reason, has_metastructure)` + `lex_command(command) -> LexResult`。机制:先对**原始字符串**扫描元结构 token 集 `_META`,命中即 `ok=False, has_metastructure=True`(词法先于 `shlex`);无元结构才 `shlex.split`;shlex 失败(如引号未闭合)→ `ok=False`;空 argv → 拒。
+- **TDD/测试**:RED = 模块不存在。首提钉管道 `|`、重定向 `>`、命令替换 `$(...)`、链接 `&&`、未闭合引号 → 拒。
+- **评审/修复**:
+  - `40bc08c`(**CRITICAL**,评审发现的注入缺口):初版 `_META` 遗漏了 glob 与换行,且列表有重复项(`$(` 出现两次)。修复重写为含 glob(`* ? [ {`)、追加重定向 `>>`、换行注入(`\n`/`\r`)的完整集,并去重 + 把多字符 token(`&&`/`||`/`>>`)排在单字符前避免顺序歧义(实测终态:`["&&","||","$(",">>","|",">","<",";","` "`" `","&","(",")","*","?","[","{","\n","\r"]`)。补 7 组测试:`rm *` glob、`file?.txt`/`[abc].py`、`echo safe\nrm -rf /` 换行注入、无空格 `echo hi|sh` / `a&&b` / `a;b`、反引号 `` `id` ``,以及纯命令仍 ok。安全意义:glob 与换行都能承载二次命令注入,缺任一项甲的结构层就有实洞。
+- **安全/SPEC**:落实 SPEC 决策 #9(甲 词法先于 shlex、元结构集完整)。任何具 shell 元结构的命令在进入 argv 判定前即被拒,是 demo ① `rm -rf /` 被 DENY 的第一道闸(此处即被 glob/结构层拦下)。
+
+### Task 14 · 命令白名单 + 危险参数规则(甲,层 3–4)— ✅ 完成 (85a1905, +839ceac)
+- **产物**:新建 `aegiscode/governance/command_rules.py` + `tests/governance/test_command_rules.py`。`judge_command(command, allowlist, rules) -> GovernanceVerdict`。判定序:先 `lex_command`(元结构/词法失败 → `DENY/CMD_STRUCT`);`argv[0] not in allowlist` → `DENY/CMD_ALLOWLIST`;再遍历扁平规则 `{argv0, args_contain, decision}`,`argv0` 匹配且 `all(tok in args for tok in args_contain)` 首命中即返回其判决(`CMD_RULE_*`);否则 `ALLOW/CMD_DEFAULT_ALLOWED`。危险集 `sudo/su/rm/chmod/chown/curl/wget` 不写显式规则——它们因不在 allowlist 而落 DENY;显式规则覆盖 `git push`(DENY)、`git commit`(APPROVAL)、`pip install`(APPROVAL)、`python -c`/`python -m`(DENY)。
+- **TDD/测试**:RED = 模块不存在。首提钉 `rm -rf /`→DENY、`pip install`→APPROVAL、`python -c`→DENY、`pytest -q`→ALLOW、不在白名单→DENY、管道→DENY。关键 `test_shipped_config_allows_pip_to_reach_approval`:直接从 `config.schema.Governance()` 代码默认(无 YAML、无手写镜像、无 `or RULES` 兜底)取 allowlist/rules,断言黄金路径 `pip install`→APPROVAL 且 `git push`→DENY——若有人清空默认规则或从白名单删掉 pip,此测试立刻红(呼应冷启动 D-CS8/D-CS15 教训)。
+- **评审/修复**:`839ceac`(多 token ALL-match 边界):补 `test_multitoken_rule_requires_all_tokens`。新增 `git reset --hard`(DENY)规则后,`git reset --hard` 两 token 齐全 → 命中 DENY,而单独 `git reset` 只有一个 token → **不**命中,git 在白名单内 → ALLOW。证明 `args_contain` 是 all-of 语义而非 any-of,避免误伤安全子命令。
+- **安全/SPEC**:落实 SPEC 决策 #9(甲 白名单 + 危险参数分档)。实测背书 demo ①:`rm -rf /` → DENY、`pip install` → REQUIRE_APPROVAL 均通过。
+
+### Task 15 · 审批状态机(HITL)— ✅ 完成 (cedc259, +85f9ad3)
+- **产物**:新建 `aegiscode/governance/approval.py` + `tests/governance/test_approval.py`。`ApprovalState(str,Enum)` = PENDING/APPROVED/REJECTED/EXPIRED/SUPERSEDED;`fingerprint(action)` = 对 `{tool, arguments}` 的 canonical JSON(`sort_keys=True`)取 SHA256;`@dataclass ApprovalRequest`(approval_id/task_id/step_index/action_snapshot/action_fingerprint/rule_id/reason/risk_explanation/state);`ApprovalStore` 提供 `create/get/decide(approved:bool)/remember(task_id,fp)/check_remembered`;`validate_resume(approved_fp, current_action)` 在 `fingerprint(current_action) != approved_fp` 时抛 `SupersededError`。
+- **TDD/测试**:RED = 模块不存在。4 测试钉:指纹稳定且对参数变化敏感(`pip install x` ≠ `pip install y`);`decide(True)` → 状态转 APPROVED;`validate_resume` 在动作从 `pip install x` 变 `pip install evil` 时抛 `SupersededError`;`remember/check_remembered` 按 `(task_id, fp)` 记忆同一指纹。
+- **评审/修复**:`85f9ad3`(style)删去未使用的 `field` import,保持 ruff 干净。核心机制无返工。
+- **安全/SPEC**:落实 SPEC 决策 #14(HITL)。指纹 + `validate_resume` 背书 demo ④ SUPERSEDED——审批授予的是"当时那个动作"的指纹,恢复时动作若被改写则判 SUPERSEDED 而非沿用旧批准,杜绝"批一个、换着执行另一个"的越权。
+
+### Task 16 · run_command 执行器(甲 层 5,shell=False)— ✅ 完成 (b64465b)
+- **产物**:新建 `aegiscode/tools/command_tool.py` + `tests/tools/test_command_tool.py`。`RunCommandTool(allowlist, rules, timeout_sec, output_max_bytes)`,`run(arguments, ctx)`:`shlex.split` 成 argv 后 `subprocess.run(argv, shell=False, cwd=ctx.workspace_root, capture_output=True, text=True, timeout=...)`;`TimeoutExpired` → `TIMEOUT`;stdout+stderr 合并并按 `output_max_bytes` 截断;returncode≠0 → `status="failure"`。此工具只执行已被判定放行的 argv,治理判决本身由 dispatcher 经 `judge_command` 完成。
+- **TDD/测试**:RED = 模块不存在。3 测试:`echo hello`→success 且输出含 hello;`python -c sys.exit(3)`→exit_code=3、failure(测试注明治理层本会在上游拦 `python -c`,此处只验执行语义);`sleep 5` 撞 1s timeout → `TIMEOUT`。
+- **安全/SPEC**:落实甲的执行层 `shell=False` + 直传 argv——即使命令字符串带元字符也不会交给 shell 解释(与 T13 结构层双重保险)。M2 评审记的 char/byte 截断口径为良性 Minor,defer。
+
+### Task 17 · run_tests 传感器 + finish 控制工具 — ✅ 完成 (93d1ca7)
+- **产物**:新建 `aegiscode/tools/run_tests_tool.py` + `aegiscode/tools/finish_tool.py` + `tests/tools/test_run_tests.py`。`RunTestsTool(test_command, timeout_sec, output_max_bytes)`:执行**配置里固定的** `test_command`(`shell=False`,`cwd=ctx.workspace_root`),`run` 忽略传入 arguments,原样返回 `ToolResult`(失败分类留给 T18);`TimeoutExpired`→`TIMEOUT`。`FinishTool` 返回 `ToolResult(tool="finish", status="success", artifacts={"finish": True})`。
+- **TDD/测试**:RED = 模块不存在。`test_runs_fixed_command` 在 tmp 工位写一个 `test_ok.py` 跑 `pytest -q` 断言 exit_code==0;`test_finish_flag` 断言 finish 工具的 `artifacts["finish"] is True`。M2 汇总记录 brief 里的 fixture 命名 bug `t_ok.py`→`test_ok.py`(否则 pytest 采集不到)已在本任务内修正。
+- **安全/SPEC**:确立 run_tests 是"固定命令传感器"——测试命令由配置冻结,不可被 LLM 经 arguments 劫持成任意命令执行,是反馈回路的可信输入源;finish 仅表意愿,真正终止由主循环的 final_verifier 裁定(M4)。
+
+
+
 
 ### 全分支最终评审(Milestone 2,opus)— READY TO MERGE
 - 安全评估:甲(词法先于 shlex、元结构集完整含 glob/newline)、乙(realpath 先于归属、commonpath 非字符串前缀)、dispatcher no-exec 在 DENY/APPROVAL/fence-fail/matcher-exception 全部气密、HITL 健全、零提示词安全。三演示①③④均有真实测试背书。
@@ -134,12 +174,39 @@
 **Worktree**:`.claude/worktrees/m3-feedback-audit-memory`,分支同名(base = main @ e143d34,M0+M1+M2 已并入)。基线 make test = 94。
 **顺序**(依赖正确):T25 secret scanner(先做,解锁 T20)→ T18 反馈分类 → T19 审计哈希链 → T20 记忆存储 → T21 上下文构建。实现/评审 sonnet(1 处 haiku 微改),最终评审 opus。
 
-### 逐任务(细节见 progress.md 账本)
-- T25 secret scanner b39c3ca +f271fd7(修 open() 句柄泄漏)。复用 redactor 的 4 类 key 模式。
-- T18 反馈分类+pytest摘要+ProgressTracker c0df597 +422f0f8(修返回注解 + 硬限摘要行数)。8 类失败分类;deque(maxlen=3) 无进展窗口。
-- T19 审计 SHA256 哈希链 af405cf +8c36acb(修 utcnow 弃用) +7f1477d(显式 commit 保证持久 + 补 hash篡改/删除 篡改类测试)。GENESIS 0*64,payload 写前脱敏,verify_chain 返回篡改 step。
-- T20 记忆存储 738ad8a +ce70499(补跨项目隔离测试)。写前 scan_text 拒绝密钥;source=agent→confirmed=False + is_governance_usable=False;参数化 SQL 无注入。
-- T21 上下文构建 932e893 +b633118(修 tier 4/5 顺序 feedback 先于 memories)。确定性 summarize、零 LLM、system 永不丢弃。
+> 说明:T25 及 T18–T21 原为塌缩 bullet(违反工作流 #11 逐任务记录纪律),现按纪律补全为逐任务详细条目(基于 git 提交 + PLAN + 源码核验重建)。参见记忆 per-task-agentlog-discipline。
+
+### Task 25 · 自写密钥扫描器(CI + 自检)— ✅ 完成 (b39c3ca, +f271fd7)
+- **依赖序**:先于 T20 做——T20 记忆 write 复用其 `scan_text` 做写前密钥拒绝。
+- **产物**:`aegiscode/credentials/scanner.py`。`_PATTERNS` 4 类确定性正则:`sk-ant-[A-Za-z0-9\-_]{20,}`(Anthropic)、`sk-[A-Za-z0-9]{20,}`(OpenAI)、`AKIA[0-9A-Z]{16}`(AWS)、`(?i)(KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[A-Za-z0-9\-_+/=]{16,}`(通用赋值)。`@dataclass Finding(path, line_no, pattern)`;`scan_text(text, path)` 逐行逐模式匹配返回 Finding 列表;`scan_paths(paths)` 遍历文件(`errors="ignore"`)。与 M0 redactor 共用同一批 key 模式(评审记为 pattern-drift 应合并单一源的跟踪项)。
+- **TDD/测试**:RED = 模块不存在。测试钉:植入 `sk-…` 被检出且带 pattern、干净文本零发现、`scan_paths` 命中文件正确行号。
+- **评审/修复(f271fd7)**:修 `scan_paths` 的 `open()` 文件句柄泄漏——改用 `with` 上下文管理器确保句柄关闭。
+- **安全/SPEC**:兑现 SPEC 决策 #18 的密钥扫描防线——确定性、可离线单测(§A.4C);既作 T20 记忆写前闸,又在 T32 被 CI secret-scan job 复用(scoped 到 shipped surface + allowlist)。
+
+### Task 18 · 反馈分类 + pytest 摘要 + 无进展指纹 — ✅ 完成 (c0df597, +422f0f8)
+- **产物**:`aegiscode/feedback/classifier.py` + `aegiscode/feedback/pytest_parser.py`。`classify(tr)` 消费 `ToolResult`,先透传已带失败 `category` 的类(POLICY_DENIED/INVALID_ACTION/TIMEOUT/TOOL_ERROR/APPROVAL_REJECTED/INTERNAL_ERROR/NO_PROGRESS),再由 `tool=="run_tests" and status=="failure"` 派生 TEST_FAILURE、其余 failure/error 归 TOOL_ERROR,成功返回 `None`(合 8 类失败空间,SPEC §M9)。`summarize_pytest(raw)` 只保留失败名 + `E ` 断言行 + 末 20 行 traceback,经 `dict.fromkeys` 去重保序。`ProgressTracker(window=3)` 用 `deque(maxlen=3)` 滑窗,`seen(fp)` 命中即返回 True——只拦完全重复的动作指纹(K=3),不臆测语义相似。
+- **TDD/测试**:RED = 模块不存在。测试钉:`classify` 对 run_tests 失败 → TEST_FAILURE、denied → POLICY_DENIED;`summarize_pytest` 在噪声中仍保留失败名与断言行且行数受限;`ProgressTracker` 首见 False、再见 True。
+- **评审/修复(422f0f8)**:两处修正——`classify` 返回注解由 `str` 收窄为 `str | None`(成功路径返回 None,注解与实现对齐);`summarize_pytest` 加硬上界 `[:40]`,防对抗性巨量 `E ` 断言行撑爆回灌;补 `test_summarize_pytest_is_hard_bounded`(100 行 E 断言 → 输出 ≤ 40 行)钉死不变量。
+- **安全/SPEC**:兑现 M9 反馈闭环确定性——分类纯规则无 LLM;pytest 摘要行数硬有界(截断回灌);无进展检测严格为完全重复指纹 K=3,不做语义猜测。
+
+### Task 19 · 审计事件 + SHA256 哈希链 + verify_chain — ✅ 完成 (af405cf, +8c36acb, +7f1477d)
+- **产物**:`aegiscode/audit/events.py`(`EventType(str,Enum)` 7 类:ACTION_PROPOSED/GOVERNANCE_DECISION/APPROVAL_REQUESTED/APPROVAL_DECIDED/TOOL_EXECUTED/FEEDBACK/TERMINATION)+ `aegiscode/audit/chain.py`。`AuditLog(conn).append()` **写前先 `redact` 脱敏** payload_json,再取 `_prev_hash`(该 task 最后一行 hash,首条为 `GENESIS = "0"*64`),`hash = SHA256(prev ‖ 规范化 body)`(body 为 sort_keys 的 task_id/step_index/event_type/timestamp/payload_json),参数化 INSERT。`verify_chain(task_id)` 从 GENESIS 起逐行重算,`stored_prev != prev or stored_hash != h` 即返回 `(False, step_index)` 定位断点,全绿返回 `(True, None)`。
+- **TDD/测试**:RED = 模块不存在。初始测试钉链可校验、篡改 payload → 定位、payload 写后脱敏(`sk-abcdef…` 不落库)。7f1477d 补三类篡改测试:hash 变异、行删除(破坏 running prev-hash 链)、多次 append 后链仍整。
+- **评审/修复**:8c36acb 修 `datetime.utcnow()` 弃用 → `datetime.now(timezone.utc)`。7f1477d 在 `append` 显式 `commit()` 保证持久。**M3 最终评审 CHANGES-REQUIRED(e529ea8)**:纯前缀重算无法检测**尾部截断**(删最后一行后前缀仍自洽)——`verify_chain` 加可选 `expected_count` 计数锚,walked 行数 ≠ 期望即返回 `(False, rows_walked)`;补测试证明删尾行时朴素 verify 仍 `(True, None)`(文档化的已知限制,完整签名按 §M8 延后),带 `expected_count` 锚点则捕获。
+- **安全/SPEC**:兑现 M8 篡改可检测 + 写前脱敏——payload 入库即脱敏,SHA256 前缀链定位首个断点,截断由计数锚兜底;明确只做可检测篡改、不做 HMAC 签名(未来项)。
+
+### Task 20 · 记忆存储(拒密钥写入 + 过滤检索)— ✅ 完成 (738ad8a, +ce70499)
+- **产物**:`aegiscode/memory/store.py`。`MemoryStore(conn).write(project_id, type, key, value, tags, source, confirmed=None)` 写前调 `scan_text`(复用 T25 `aegiscode/credentials/scanner.py`,b39c3ca)命中密钥即返回 `None` 拒写;`source=="agent"` 强制 `confirmed=False`,否则默认 `True`;`uuid4` 主键、时区感知 UTC 时间戳、参数化 INSERT(无注入)。`retrieve(project_id, query=None, top_k=8)` 按 `project_id` 过滤 + 可选关键词 `LIKE`(key/value/tags_json)+ `ORDER BY last_used_at DESC LIMIT top_k`,命中行 bump `use_count`/`last_used_at`。`is_governance_usable(row)` 静态判定 `source != "agent"`——Agent 记忆永不作治理依据。
+- **TDD/测试**:RED = 模块不存在。初始测试钉:拒写密钥 value、关键词检索命中、agent 记忆 `confirmed==0` 且 `is_governance_usable` 为 False、topK 上限(12 写入 → 检索 8)。ce70499 补跨项目隔离(`test_retrieve_is_project_scoped`):p1/p2 各写一条,检索互不串;关键词搜也不跨项目。
+- **评审/修复**:**M3 最终评审 CHANGES-REQUIRED(e529ea8)**——① `retrieve` 缺 `type` 过滤(SPEC §M10 要求 type+project+关键词+topK),补 `type=None` 参数与 `AND type=?` 分支及 `test_retrieve_filters_by_type`;② 脱敏只扫 value 有漏——`write` 扩为 `scan_text(value) or scan_text(key) or scan_text(" ".join(tags))`,补 `test_write_refuses_secret_in_key_or_tags`(密钥藏 key 或 tags 均拒写)。
+- **安全/SPEC**:兑现 M10——写入过脱敏器(密钥在 value/key/tags 任一位置皆拒)、source=agent 永不治理可用、检索严格 project 隔离(无跨项目泄漏)、全参数化 SQL。
+
+### Task 21 · 上下文构建(6 段预算装配 + 确定性摘要)— ✅ 完成 (932e893, +b633118)
+- **产物**:`aegiscode/memory/context_builder.py`。`build_context(system_prompt, tool_protocol, task, recent_steps, last_feedback, memories, budget_chars)` 按优先级装配 messages:① system + 工具协议 ② TASK ③ recent steps(newest-last 明细)④ 最新反馈 ⑤ 记忆 top-k ⑥ 代码片段。超 `budget_chars` 时**从最旧轮起**用 `summarize_step(step)` 有损摘要化(仅留 `tool`/`governance_decision`/`feedback_category`,丢 detail)——**零 LLM、纯确定性**,head(system 段)永不进入摘要/丢弃循环。
+- **TDD/测试**:RED = 模块不存在。测试钉:`summarize_step` 确定性且有损(含 tool 与 feedback_category、剔除大段 detail、两次调用相等);预算触发摘要后总字符有界且 system 段仍在。b633118 补 `test_feedback_precedes_memories_in_order`(反馈内容下标 < 记忆内容下标)。
+- **评审/修复(b633118)**:修 tier 顺序——原实现记忆(tier 5)排在反馈(tier 4)之前,违反 SPEC 优先级;调整为反馈先于记忆装入 tail 并补序测试钉死。
+- **安全/SPEC**:兑现 M10 上下文段——6 段优先级装配 + 字符数近似预算 + 超预算确定性摘要化最旧轮(不调 LLM),system-constraints 段任何情况下不被丢弃。
+
 
 ### 全分支最终评审(Milestone 3,opus)— CHANGES REQUIRED → 已解决(e529ea8)
 - **阻断**:retrieve 缺 type 过滤(SPEC §M10/§14 验收明列 type+project+keyword+topK)。已补可选 type 参数 + AND type=?。
