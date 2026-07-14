@@ -37,10 +37,24 @@ class JsonFileBackend:
 
     def _save(self, data: dict) -> None:
         d = os.path.dirname(self.path) or "."
-        os.makedirs(d, exist_ok=True)
-        # Write then tighten perms to 0600 (owner read/write only).
-        with open(self.path, "w", encoding="utf-8") as fh:
+        # Create the credential dir owner-only (0700). makedirs ignores mode on
+        # existing dirs, so also chmod the leaf when we own it (I2: no
+        # world-traversable window). Best-effort chmod — a shared dir we don't
+        # own must not crash credential saves.
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
+        # Create the file restricted from the start (0600) via os.open so the
+        # plaintext key is never world/group-readable, even transiently (I1).
+        # os.open honours the mode arg minus umask; open(path,"w") would create
+        # it at 0644 under a permissive umask before any chmod could tighten it.
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh)
+        # Re-assert 0600 in case the file pre-existed with looser perms
+        # (O_CREAT does not change mode on an existing file).
         try:
             os.chmod(self.path, 0o600)
         except OSError:
