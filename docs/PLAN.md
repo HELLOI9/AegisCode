@@ -1760,7 +1760,7 @@ git commit -m "feat: run_tests sensor (fixed command) + finish control tool"
 
 ## Milestone 3 — Feedback, Audit, Memory
 
-### Task 18: Feedback classifier + pytest parser + no-progress fingerprint
+### Task 18: Feedback classifier + pytest parser + no-progress fingerprint ✅ DONE (c0df597, +422f0f8)
 
 **Files:**
 - Create: `aegiscode/feedback/__init__.py`, `aegiscode/feedback/classifier.py`, `aegiscode/feedback/pytest_parser.py`, `tests/feedback/test_classifier.py`
