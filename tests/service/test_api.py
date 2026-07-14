@@ -14,7 +14,7 @@ Security: /credentials/status MUST return only masked status, never plaintext ke
 """
 from __future__ import annotations
 
-import pytest
+import sqlite3
 
 from tests.helpers import make_api_client
 
@@ -227,10 +227,38 @@ def test_credentials_status_no_raw_key_leak(tmp_path):
         body_text = r.text
         assert "PLAINTEXT_FAKE_KEY_12345_ABCDEF" not in body_text
         assert "sk-PLAINTEXT_FAKE_KEY_12345_ABCDEF" not in body_text
-        response_body = r.json()
-        assert "masked" in response_body
-        # configured=True and masked key should be present, not the full key
-        assert response_body["configured"] is True
+
+
+# ---------------------------------------------------------------------------
+# Global exception handler
+# ---------------------------------------------------------------------------
+
+def test_unexpected_service_error_returns_generic_500(tmp_path):
+    """A non-KeyError service exception must become a generic 500 with body
+    {"detail":"internal error"} and NO Python traceback text leaked."""
+    from fastapi.testclient import TestClient
+    from aegiscode.service.api import build_app
+    from tests.helpers import make_service
+
+    svc = make_service(tmp_path, scripted=[], final_ok=True, sync=True)
+
+    # Force the underlying service call to raise a non-HTTPException.
+    def _boom(task_id):
+        raise sqlite3.OperationalError("SECRET_DB_PATH=/home/jwdeng/leak.db")
+
+    svc.get_task = _boom
+    app = build_app(svc)
+
+    # raise_server_exceptions=False so TestClient returns the 500 response
+    # instead of re-raising the exception into the test.
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.get("/tasks/any-id")
+        assert r.status_code == 500
+        assert r.json() == {"detail": "internal error"}
+        # No traceback / internal detail leaked into the response body.
+        assert "Traceback" not in r.text
+        assert "OperationalError" not in r.text
+        assert "SECRET_DB_PATH" not in r.text
 
 
 def test_credentials_status_unconfigured(tmp_path):

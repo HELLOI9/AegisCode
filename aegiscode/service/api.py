@@ -10,13 +10,17 @@ plaintext credential value is never included in any API response.
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from aegiscode.credentials.store import CredentialStore
 from aegiscode.service.app_service import ApplicationService
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +66,20 @@ def build_app(
         ),
         version="1.0.0",
     )
+
+    # -----------------------------------------------------------------------
+    # Global exception handler
+    # -----------------------------------------------------------------------
+    # Any non-HTTPException that escapes a service call (sqlite3.OperationalError,
+    # ValueError, etc.) is caught here and turned into a generic 500. This
+    # prevents a real running server from leaking the full Python traceback —
+    # which could expose db/file paths or config — in the response body.
+    # HTTPExceptions (e.g. 404) are handled by FastAPI's own handlers and are
+    # NOT swallowed here.
+    @app.exception_handler(Exception)
+    async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "internal error"})
 
     # Fall back to an always-unconfigured store if none provided.
     if credential_store is None:
