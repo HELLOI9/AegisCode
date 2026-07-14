@@ -15,7 +15,7 @@ class AuditLog:
 
     def append(self, task_id, step_index, event_type, payload: dict) -> str:
         payload_json = redact(json.dumps(payload, sort_keys=True))
-        ts = datetime.datetime.utcnow().isoformat()
+        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
         prev = self._prev_hash(task_id)
         body = json.dumps({"task_id": task_id, "step_index": step_index,
             "event_type": str(event_type), "timestamp": ts, "payload_json": payload_json},
