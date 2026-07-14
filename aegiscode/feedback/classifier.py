@@ -1,6 +1,6 @@
 from collections import deque
 
-def classify(tr) -> str:
+def classify(tr) -> str | None:
     if tr.category in {"POLICY_DENIED", "INVALID_ACTION", "TIMEOUT", "TOOL_ERROR",
                        "APPROVAL_REJECTED", "INTERNAL_ERROR", "NO_PROGRESS"}:
         return tr.category

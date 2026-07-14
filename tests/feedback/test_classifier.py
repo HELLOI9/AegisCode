@@ -19,3 +19,8 @@ def test_progress_tracker_detects_repeat():
     t = ProgressTracker(window=3)
     assert t.seen("fp") is False
     assert t.seen("fp") is True
+
+def test_summarize_pytest_is_hard_bounded():
+    raw = "\n".join(f"E   assert {i} == {i+1}" for i in range(100))
+    out = summarize_pytest(raw)
+    assert len(out.splitlines()) <= 40
