@@ -1506,7 +1506,7 @@ git commit -m "feat: command allowlist + dangerous-param rules (rm/sudo/pip/pyth
 
 ---
 
-### Task 15: Approval state machine (HITL)
+### Task 15: Approval state machine (HITL) ✅ DONE (cedc259, +85f9ad3)
 
 **Files:**
 - Create: `aegiscode/governance/approval.py`, `tests/governance/test_approval.py`
