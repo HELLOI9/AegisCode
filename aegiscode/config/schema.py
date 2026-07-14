@@ -52,8 +52,10 @@ _DEFAULT_COMMAND_RULES: list["CommandRule"] = [
 
 class Governance(_Strict):
     command_allowlist: list[str] = [
-        "python", "python3", "pip", "pytest", "ruff", "mypy", "git", "ls", "cat"
-    ]
+        "python", "python3", "pip", "pytest", "ruff", "mypy", "git"
+    ]  # NOTE: `cat`/`ls` deliberately excluded — fenced read_file/list_files
+    # cover those jobs. A general file reader in the command allowlist can take
+    # an arbitrary path arg and sidestep the sensitive-file fence (defect C3).
     command_rules: list[CommandRule] = Field(
         default_factory=lambda: list(_DEFAULT_COMMAND_RULES)
     )  # baked-in; YAML fully overrides

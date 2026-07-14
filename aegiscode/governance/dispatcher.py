@@ -1,4 +1,8 @@
 # aegiscode/governance/dispatcher.py
+import fnmatch
+import os
+
+from aegiscode.governance.command_lexer import lex_command
 from aegiscode.governance.decision import Decision
 from aegiscode.governance.engine import GovernanceVerdict
 from aegiscode.governance.path_fence import check_path
@@ -7,11 +11,64 @@ from aegiscode.tools.result import ToolResult
 _FILE_TOOLS = {"read_file", "write_file", "list_files", "search_text"}
 
 
+def _is_path_like(token, sensitive_patterns):
+    """True if a command token should be run through the path fence.
+
+    A token is path-like when it names a filesystem location rather than a
+    subcommand/flag/option-value:
+      - absolute ("/etc/passwd"), or explicitly relative ("./x", "../x"), or
+      - contains a "/" anywhere ("tests/", "a/b"), or
+      - its basename matches a sensitive pattern even with NO slash (".env",
+        "key.pem") — this is what catches `cat .env`.
+    Bare flags ("-q", "--hard") and bare subcommands/words ("install",
+    "status") are NOT path-like, so normal usage is not falsely denied.
+    """
+    if not token or not isinstance(token, str):
+        return False
+    if token.startswith("/") or token.startswith("./") or token.startswith("../"):
+        return True
+    if "/" in token:
+        return True
+    # No-slash token: fence only if its basename matches a sensitive pattern.
+    base = os.path.basename(token)
+    return any(fnmatch.fnmatch(base, pat) for pat in sensitive_patterns)
+
+
+def _fence_command(command, root, sensitive_patterns):
+    """Return a reason string if any path-like token in `command` fails the
+    path fence, else None. A leading `--opt=` on a token is stripped so the
+    value part is checked too."""
+    lex = lex_command(command)
+    if not lex.ok:
+        # Metastructure / lex failure is the command judge's job, not the fence.
+        return None
+    for token in lex.argv:
+        candidate = token
+        if token.startswith("--") and "=" in token:
+            candidate = token.split("=", 1)[1]  # check the value after --opt=
+        if not _is_path_like(candidate, sensitive_patterns):
+            continue
+        pv = check_path(candidate, root, sensitive_patterns)
+        if not pv.allowed:
+            return pv.reason
+    return None
+
+
 class Dispatcher:
     def __init__(self, registry, engine, path_config):
         self.registry = registry
         self.engine = engine
         self.pc = path_config
+
+    def _run_command_fence_reason(self, action, ctx):
+        """None if action is not a fence-violating run_command, else the reason."""
+        if action.tool != "run_command":
+            return None
+        command = action.arguments.get("command", "")
+        if not command:
+            return None
+        root = getattr(ctx, "workspace_root", None) or self.pc.workspace_root
+        return _fence_command(command, root, self.pc.sensitive_patterns)
 
     def dispatch(self, action, ctx):
         tool = self.registry.get(action.tool)
@@ -50,6 +107,21 @@ class Dispatcher:
                         summary=pv.reason,
                     ),
                 )
+
+        # run_command path fence: even an allowlisted command must not reference
+        # a path that escapes the workspace or matches a sensitive pattern
+        # (defect C3 — `cat /etc/passwd` / `cat .env` sidestepped the file fence).
+        cmd_reason = self._run_command_fence_reason(action, ctx)
+        if cmd_reason is not None:
+            return (
+                GovernanceVerdict(Decision.DENY, "CMD_PATH_FENCE", cmd_reason),
+                ToolResult(
+                    tool=action.tool,
+                    status="denied",
+                    category="POLICY_DENIED",
+                    summary=cmd_reason,
+                ),
+            )
 
         # Policy engine evaluation — guard against matcher bugs.
         try:
@@ -114,5 +186,16 @@ class Dispatcher:
                     category="POLICY_DENIED",
                     summary=pv.reason,
                 )
+
+        # run_command fence is likewise a workspace-safety invariant: even an
+        # approved command must not reference an escaping/sensitive path.
+        cmd_reason = self._run_command_fence_reason(action, ctx)
+        if cmd_reason is not None:
+            return ToolResult(
+                tool=action.tool,
+                status="denied",
+                category="POLICY_DENIED",
+                summary=cmd_reason,
+            )
 
         return tool.run(action.arguments, ctx)
