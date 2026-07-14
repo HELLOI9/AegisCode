@@ -12,7 +12,7 @@ class TerminationReason(str, Enum):
 class LoopCounters:
     step: int; consecutive_failures: int; invalid_actions: int; no_progress_hits: int
 
-def decide_termination(c: LoopCounters, limits: dict):
+def decide_termination(c: LoopCounters, limits: dict) -> TerminationReason | None:
     if c.invalid_actions >= limits["action_retry_limit"]:
         return TerminationReason.INVALID_ACTION_LIMIT
     if c.consecutive_failures >= limits["max_consecutive_failures"]:

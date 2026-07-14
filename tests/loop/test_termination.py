@@ -20,3 +20,10 @@ def test_invalid_action_limit():
 
 def test_nine_reasons_defined():
     assert len(list(TerminationReason)) == 9
+
+def test_priority_invalid_action_wins_over_max_steps():
+    # both max_steps and action_retry_limit breached simultaneously
+    c = LoopCounters(step=25, consecutive_failures=0, invalid_actions=3, no_progress_hits=0)
+    limits = {"max_steps": 25, "max_consecutive_failures": 5,
+              "no_progress_repeat_limit": 3, "action_retry_limit": 3}
+    assert decide_termination(c, limits) == TerminationReason.INVALID_ACTION_LIMIT
