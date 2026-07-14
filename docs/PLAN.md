@@ -1684,7 +1684,7 @@ git commit -m "feat: run_command executor (shell=False, argv, timeout, truncatio
 
 ---
 
-### Task 17: run_tests sensor + finish tool
+### Task 17: run_tests sensor + finish tool ✅ DONE (93d1ca7)
 
 **Files:**
 - Create: `aegiscode/tools/run_tests_tool.py`, `aegiscode/tools/finish_tool.py`, `tests/tools/test_run_tests.py`
