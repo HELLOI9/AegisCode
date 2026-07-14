@@ -1067,7 +1067,7 @@ git commit -m "feat: file tools (list/read/search/write) with binary skip + size
 
 > Governance is deliberately decomposed into separate files/tasks: decision types + engine (T10), path fence (T11), dispatch integration (T12), command lexer (T13), command rules (T14), approval state machine (T15). **There is no single `guardrail.py`.**
 
-### Task 10: Decision types + ordered PolicyEngine (first-match-wins)
+### Task 10: Decision types + ordered PolicyEngine (first-match-wins) ✅ DONE (5a6739d, +3c402ea)
 
 **Files:**
 - Create: `aegiscode/governance/__init__.py`, `aegiscode/governance/decision.py`, `aegiscode/governance/engine.py`, `tests/governance/test_engine.py`
@@ -1150,7 +1150,7 @@ git commit -m "feat: governance Decision enum + ordered first-match PolicyEngine
 
 ---
 
-### Task 11: Path fence (乙) — realpath ownership + sensitive-file blacklist
+### Task 11: Path fence (乙) — realpath ownership + sensitive-file blacklist ✅ DONE (fd91949, +1cde65e)
 
 **Files:**
 - Create: `aegiscode/governance/path_fence.py`, `tests/governance/test_path_fence.py`
@@ -1235,7 +1235,7 @@ git commit -m "feat: path fence with realpath ownership + symlink-escape denial"
 
 ---
 
-### Task 12: Governed dispatcher — wire path fence + default tiers into tool dispatch
+### Task 12: Governed dispatcher — wire path fence + default tiers into tool dispatch ✅ DONE (c62f0e0, +e752c54)
 
 **Files:**
 - Create: `aegiscode/governance/dispatcher.py`, `tests/governance/test_dispatcher.py`
@@ -1329,7 +1329,7 @@ git commit -m "feat: governed dispatcher (path fence + tiers + no-exec on DENY/A
 
 ---
 
-### Task 13: Command lexer + structure-safety layer (甲, layers 1–2)
+### Task 13: Command lexer + structure-safety layer (甲, layers 1–2) ✅ DONE (9f1b33c, fix 40bc08c)
 
 **Files:**
 - Create: `aegiscode/governance/command_lexer.py`, `tests/governance/test_command_lexer.py`
@@ -1405,7 +1405,7 @@ git commit -m "feat: command lexer + structure-safety layer (metastructure -> re
 
 ---
 
-### Task 14: Command allowlist + dangerous-param rules (甲, layers 3–4)
+### Task 14: Command allowlist + dangerous-param rules (甲, layers 3–4) ✅ DONE (85a1905, +839ceac)
 
 **Files:**
 - Create: `aegiscode/governance/command_rules.py`, `tests/governance/test_command_rules.py`
@@ -1506,7 +1506,7 @@ git commit -m "feat: command allowlist + dangerous-param rules (rm/sudo/pip/pyth
 
 ---
 
-### Task 15: Approval state machine (HITL)
+### Task 15: Approval state machine (HITL) ✅ DONE (cedc259, +85f9ad3)
 
 **Files:**
 - Create: `aegiscode/governance/approval.py`, `tests/governance/test_approval.py`
@@ -1605,7 +1605,7 @@ git commit -m "feat: HITL approval state machine + fingerprint supersede + remem
 
 ---
 
-### Task 16: run_command executor tool (甲 layer 5, shell=False)
+### Task 16: run_command executor tool (甲 layer 5, shell=False) ✅ DONE (b64465b)
 
 **Files:**
 - Create: `aegiscode/tools/command_tool.py`, `tests/tools/test_command_tool.py`
@@ -1684,7 +1684,7 @@ git commit -m "feat: run_command executor (shell=False, argv, timeout, truncatio
 
 ---
 
-### Task 17: run_tests sensor + finish tool
+### Task 17: run_tests sensor + finish tool ✅ DONE (93d1ca7)
 
 **Files:**
 - Create: `aegiscode/tools/run_tests_tool.py`, `aegiscode/tools/finish_tool.py`, `tests/tools/test_run_tests.py`

@@ -1,0 +1,76 @@
+# aegiscode/governance/dispatcher.py
+from aegiscode.governance.decision import Decision
+from aegiscode.governance.engine import GovernanceVerdict
+from aegiscode.governance.path_fence import check_path
+from aegiscode.tools.result import ToolResult
+
+_FILE_TOOLS = {"read_file", "write_file", "list_files", "search_text"}
+
+
+class Dispatcher:
+    def __init__(self, registry, engine, path_config):
+        self.registry = registry
+        self.engine = engine
+        self.pc = path_config
+
+    def dispatch(self, action, ctx):
+        tool = self.registry.get(action.tool)
+        if tool is None:
+            return (
+                GovernanceVerdict(Decision.DENY, "UNKNOWN_TOOL", "unknown tool"),
+                ToolResult(
+                    tool=action.tool,
+                    status="error",
+                    category="INVALID_ACTION",
+                    summary=f"unknown tool {action.tool}",
+                ),
+            )
+
+        # Path fence: run before policy engine for all file tools that carry a path arg.
+        if action.tool in _FILE_TOOLS and "path" in action.arguments:
+            pv = check_path(
+                action.arguments["path"],
+                self.pc.workspace_root,
+                self.pc.sensitive_patterns,
+            )
+            if not pv.allowed:
+                return (
+                    GovernanceVerdict(Decision.DENY, "PATH_FENCE", pv.reason),
+                    ToolResult(
+                        tool=action.tool,
+                        status="denied",
+                        category="POLICY_DENIED",
+                        summary=pv.reason,
+                    ),
+                )
+
+        # Policy engine evaluation — guard against matcher bugs.
+        try:
+            verdict = self.engine.evaluate(action, ctx)
+        except Exception as exc:  # noqa: BLE001
+            return (
+                GovernanceVerdict(Decision.DENY, "INTERNAL_ERROR", str(exc)),
+                ToolResult(
+                    tool=action.tool,
+                    status="error",
+                    category="INTERNAL_ERROR",
+                    summary=f"policy engine error: {exc}",
+                ),
+            )
+
+        if verdict.decision == Decision.DENY:
+            return (
+                verdict,
+                ToolResult(
+                    tool=action.tool,
+                    status="denied",
+                    category="POLICY_DENIED",
+                    summary=verdict.reason,
+                ),
+            )
+
+        if verdict.decision == Decision.REQUIRE_APPROVAL:
+            return (verdict, None)
+
+        # ALLOW or ALLOW_WITH_AUDIT — execute.
+        return (verdict, tool.run(action.arguments, ctx))

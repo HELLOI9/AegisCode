@@ -97,3 +97,33 @@
 - **多轮记录/status 分类等覆盖建议**:opus 建议后续加 MockLLM 多轮 received_messages[2] 断言(demo② 依赖)——记入 M4 主循环时补。
 - **人工干预**:控制器决定合并修 Important+2 Minor(错误契约是主循环安全网的关键一致性;Literal 让控制流 seam 防拼写错)。
 - **下一步**:PR + merge;之后 Milestone 2(治理,main contribution)。
+
+---
+
+## 2026-07-14 · Milestone 2 启动(治理 — main contribution)
+**Worktree**:`.claude/worktrees/m2-governance`,分支 `worktree-m2-governance`(base = main @ 43576ff,M0+M1 已并入)。基线 `make test` = 48 passed。
+**模块**:T10 决策+引擎、T11 路径围栏(乙)、T12 受治理分发器、T13 命令词法(甲 1-2层)、T14 命令规则(甲 3-4层)、T15 审批状态机、T16 命令执行工具、T17 run_tests+finish。全部依赖已在 main。
+
+### Task 10 · Decision + 有序 PolicyEngine — ✅ 完成 (5a6739d, +3c402ea)
+- **TDD**:RED = 模块不存在;GREEN = 3 新测试,`make test` 51 passed。
+- **产物**:aegiscode/governance/{__init__,decision.py,engine.py}。decision.py 纯 re-export config.schema.Decision(单一真源,test 断言 `Decision is ConfigDecision` 身份成立);GovernanceVerdict/PolicyRule dataclass;PolicyEngine.evaluate 有序 first-match-wins,无命中走 default_fn;每判定带 rule_id+reason。无具体规则(留给 T11/T13/T14)。
+- **两阶段评审**:spec ✅、quality Approved。2 Minor:①matcher 异常未捕获(引擎骨架,交 T12 dispatcher 作 try/except 边界)②单规则 ordering 测试不足以证 first-match-wins。②加 2 规则 ordering 测试 3c402ea(52 passed);①carried 到 T12。
+- **人工干预**:控制器决定补 ordering 测试(证治理核心不变量),matcher 异常 carry 到 dispatcher。
+
+### Task 11-17 · 治理其余任务 — ✅ 全部完成
+(逐任务细节见 progress.md 账本;此处记里程碑与最终评审)
+- T11 路径围栏(乙) fd91949 +1cde65e(sibling-prefix)+b48f4a9(符号链接指向敏感文件绕过修复,M2 最终评审发现)
+- T12 受治理分发器 c62f0e0 +e752c54(no-exec spy 断言);含 T10 carried 的 matcher 异常 guard→INTERNAL_ERROR
+- T13 命令词法(甲1-2) 9f1b33c +40bc08c(CRITICAL:glob 注入缺失 + newline + _META 排序修复)
+- T14 命令规则(甲3-4) 85a1905 +839ceac(多token ALL-match 边界);demo① rm -rf→DENY / pip install→APPROVAL 实测通过
+- T15 审批状态机 cedc259 +85f9ad3;fingerprint+validate_resume 背书 demo④ SUPERSEDED
+- T16 run_command 执行器 b64465b;shell=False+argv 确认
+- T17 run_tests 传感器+finish 93d1ca7;修 brief bug t_ok.py→test_ok.py;run_tests 固定命令不可被 arguments 劫持
+
+### 全分支最终评审(Milestone 2,opus)— READY TO MERGE
+- 安全评估:甲(词法先于 shlex、元结构集完整含 glob/newline)、乙(realpath 先于归属、commonpath 非字符串前缀)、dispatcher no-exec 在 DENY/APPROVAL/fence-fail/matcher-exception 全部气密、HITL 健全、零提示词安全。三演示①③④均有真实测试背书。
+- **发现并当场修**:乙的敏感文件检查只查输入路径字符串,in-workspace 符号链接 report.txt->.env 可绕过黑名单(归属通过但读到 .env)。b48f4a9 修:敏感匹配同时对解析后 realpath 执行(fail-safe 叠加)+回归测试。94 passed。
+- **两项 M4 强制跟踪项(不可遗漏)**:①judge_command 命令管线目前是 orphan——dispatcher 尚无 run_command→甲管线的分支;②config 驱动的 default_fn(readonly→ALLOW/write→APPROVAL/command→DENY)尚无组装。二者根因同:装配缝隙属 M4/T23。建议建 aegiscode/governance/factory.py(build_engine/build_default_fn),并加两个集成测试:(a)经 Dispatcher.dispatch 的 run_command "rm -rf /"→DENY no-exec;(b)write_file 越 allowlist→APPROVAL。评审判定 defer 合理(M2 是单元组合里程碑,无 harness 故非活漏洞)。
+- 延后 Minor:T16 char/byte 截断(良性)、T17 arguments 忽略注释、readonly_tools 未被 dispatcher 消费(factory 统一)、ApprovalRequest 缺 §11.4 部分字段(TaskState 落地时补)、dispatcher/tool 两条路径解析需 M4 保证一致。
+- **人工干预**:控制器当场修乙绕过(安全核心、fail-safe、单文件);其余按评审 defer 并记为 M4 硬性条件。
+- 下一步:PR + merge;之后 Milestone 3(反馈/审计/记忆)。
