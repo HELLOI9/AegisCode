@@ -7,6 +7,8 @@ No external agent SDK or framework — just a plain Python while-loop composing:
 """
 from __future__ import annotations
 
+import time
+
 from aegiscode.protocol.parser import parse_action, ActionParseError
 from aegiscode.governance.decision import Decision
 from aegiscode.feedback.classifier import classify, ProgressTracker
@@ -56,10 +58,16 @@ class HarnessCore:
         recent_steps: list[dict] = []
         tracker = ProgressTracker(window=self.config.limits.no_progress_repeat_limit)
         limits = self.config.limits.model_dump()
+        # Monotonic start for the wall-clock timeout stop condition. Checked
+        # each turn BEFORE any LLM call / tool dispatch so a hung run fails
+        # closed (no further actions execute). Uses time.monotonic (immune to
+        # clock adjustments); tests monkeypatch this module's `time.monotonic`.
+        start = time.monotonic()
 
         while True:
-            # ---- pre-step termination check ----
-            reason = decide_termination(c, limits)
+            # ---- pre-step termination check (incl. wall-clock timeout) ----
+            elapsed_sec = time.monotonic() - start
+            reason = decide_termination(c, limits, elapsed_sec=elapsed_sec)
             if reason is not None:
                 self._audit_term(c, reason)
                 return reason

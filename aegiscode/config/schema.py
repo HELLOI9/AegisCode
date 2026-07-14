@@ -20,6 +20,10 @@ class Limits(_Strict):
     action_retry_limit: int = 3
     llm_max_retries: int = 3
     command_timeout_sec: int = 30
+    # Wall-clock bound on a whole run() loop (acceptance §一 "timeout" stop
+    # condition). Large default so offline MockLLM runs (millisecond-scale) never
+    # trip it — this guards real-provider runs where a call could otherwise hang.
+    wall_clock_timeout_sec: int = 300
     output_max_bytes: int = 65536
 
 

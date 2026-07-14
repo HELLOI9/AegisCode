@@ -1,10 +1,19 @@
+import urllib.request
+
 from aegiscode.llm.base import LLMClient
 
+# Bounded wall-clock timeout (seconds) for a single LLM HTTP round-trip. Without
+# this, a hung connection blocks urlopen forever with no escape. Module-level
+# constant (adapters have no config handle); shared by OpenAI + Anthropic via
+# _real_post. Kept below the loop's wall_clock_timeout_sec so the socket gives up
+# before the whole-run bound would.
+HTTP_TIMEOUT_SEC = 60
+
 def _real_post(url, headers, json):
-    import urllib.request, json as _j
+    import json as _j
     req = urllib.request.Request(url, data=_j.dumps(json).encode(),
         headers={**headers, "Content-Type":"application/json"})
-    with urllib.request.urlopen(req) as r:
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SEC) as r:
         return _j.loads(r.read())
 
 class OpenAIAdapter(LLMClient):
