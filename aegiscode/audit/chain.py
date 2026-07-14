@@ -28,8 +28,11 @@ class AuditLog:
         self.conn.commit()
         return h
 
-    def verify_chain(self, task_id):
+    # NOTE: Without expected_count, trailing-row truncation is not detectable (known limitation;
+    # full signing deferred per SPEC §M8).
+    def verify_chain(self, task_id, expected_count=None):
         prev = GENESIS
+        rows_walked = 0
         for row in self.conn.execute(
             "SELECT step_index,timestamp,event_type,payload_json,prev_hash,hash "
             "FROM audit_events WHERE task_id=? ORDER BY event_id", (task_id,)):
@@ -41,4 +44,7 @@ class AuditLog:
             if stored_prev != prev or stored_hash != h:
                 return (False, step_index)
             prev = stored_hash
+            rows_walked += 1
+        if expected_count is not None and rows_walked != expected_count:
+            return (False, rows_walked)
         return (True, None)

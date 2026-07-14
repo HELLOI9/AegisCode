@@ -11,8 +11,8 @@ class MemoryStore:
         self.conn = conn
 
     def write(self, project_id, type, key, value, tags, source, confirmed=None):
-        """Insert a memory row. Returns memory_id or None if value contains a secret."""
-        if scan_text(value):
+        """Insert a memory row. Returns memory_id or None if value/key/tags contains a secret."""
+        if scan_text(value) or scan_text(key) or scan_text(" ".join(tags or [])):
             return None
 
         if source == "agent":
@@ -30,8 +30,8 @@ class MemoryStore:
         )
         return mid
 
-    def retrieve(self, project_id, query=None, top_k=8):
-        """Retrieve memories filtered by project_id + optional keyword, ordered by last_used_at DESC."""
+    def retrieve(self, project_id, query=None, top_k=8, type=None):  # noqa: A002
+        """Retrieve memories filtered by project_id + optional keyword/type, ordered by last_used_at DESC."""
         sql = (
             "SELECT memory_id,project_id,type,key,value,tags_json,source,confirmed,use_count "
             "FROM memories WHERE project_id=?"
@@ -40,6 +40,9 @@ class MemoryStore:
         if query:
             sql += " AND (key LIKE ? OR value LIKE ? OR tags_json LIKE ?)"
             params += [f"%{query}%"] * 3
+        if type is not None:
+            sql += " AND type=?"
+            params.append(type)
         sql += " ORDER BY last_used_at DESC LIMIT ?"
         params.append(top_k)
 

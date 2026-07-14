@@ -50,3 +50,14 @@ def test_intact_chain_after_appends_verifies(tmp_path):
     for i in range(5):
         log.append("t1", i, EventType.FEEDBACK, {"i": i})
     assert log.verify_chain("t1") == (True, None)
+
+def test_tail_truncation_detected_with_expected_count(tmp_path):
+    conn = open_db(str(tmp_path / "a.db"))
+    log = AuditLog(conn)
+    for i in range(3):
+        log.append("t1", i, EventType.TOOL_EXECUTED, {"i": i})
+    # delete the LAST row — prefix stays valid, so plain verify can't catch it:
+    conn.execute("DELETE FROM audit_events WHERE task_id='t1' AND step_index=2")
+    assert log.verify_chain("t1") == (True, None)          # plain chain still 'intact' (documented limitation)
+    ok, _ = log.verify_chain("t1", expected_count=3)        # but count anchor catches truncation
+    assert ok is False

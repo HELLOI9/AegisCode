@@ -37,3 +37,16 @@ def test_retrieve_is_project_scoped(tmp_path):
     assert len(p2) == 1 and all("beta" in r["value"] for r in p2)
     # keyword search must also not cross projects:
     assert s.retrieve("p1", query="beta") == []
+
+def test_retrieve_filters_by_type(tmp_path):
+    s = _store(tmp_path)
+    s.write("p1", "PROJECT_CONVENTION", "k1", "conv value", [], "user")
+    s.write("p1", "CODEBASE_FACT", "k2", "fact value", [], "user")
+    only_conv = s.retrieve("p1", type="PROJECT_CONVENTION")
+    assert len(only_conv) == 1 and only_conv[0]["type"] == "PROJECT_CONVENTION"
+    assert {r["type"] for r in s.retrieve("p1")} == {"PROJECT_CONVENTION", "CODEBASE_FACT"}  # no filter = all
+
+def test_write_refuses_secret_in_key_or_tags(tmp_path):
+    s = _store(tmp_path)
+    assert s.write("p1", "PROJECT_CONVENTION", "sk-abc123def456ghi789jkl012", "v", [], "user") is None
+    assert s.write("p1", "PROJECT_CONVENTION", "k", "v", ["AKIAIOSFODNN7EXAMPLE"], "user") is None
