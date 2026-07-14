@@ -1950,7 +1950,7 @@ git commit -m "feat: audit events + SHA256 hash chain + verify_chain tamper dete
 
 ---
 
-### Task 20: Memory store (write-with-redaction + filtered retrieval)
+### Task 20: Memory store (write-with-redaction + filtered retrieval) ✅ DONE (738ad8a, +ce70499)
 
 **Files:**
 - Create: `aegiscode/memory/__init__.py`, `aegiscode/memory/store.py`, `tests/memory/test_store.py`
