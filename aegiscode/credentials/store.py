@@ -33,7 +33,8 @@ class CredentialStore:
                 with open(self.dotenv_path) as f:
                     for line in f:
                         if line.startswith("OPENAI_API_KEY="):
-                            return line.split("=", 1)[1].strip()
+                            value = line.split("=", 1)[1].strip()
+                            return value.strip('"').strip("'")
             except OSError:
                 pass
         # Layer 3: environment dict
@@ -43,8 +44,11 @@ class CredentialStore:
         v = self.get_key()
         if not v:
             return {"configured": False, "masked": None}
-        # Mask: show up to first 3 chars + ellipsis + last 4 — NEVER the full key
-        prefix = v[:3]
-        suffix = v[-4:] if len(v) >= 4 else v
-        masked = prefix + "…" + suffix
+        # Mask: show first 3 + ellipsis + last 4 — NEVER the full key.
+        # Short secrets (<8) are fully hidden: prefix+suffix would otherwise
+        # reconstruct the entire key (e.g. "sk-1234" -> "sk-" + "1234").
+        if len(v) < 8:
+            masked = "***"
+        else:
+            masked = v[:3] + "…" + v[-4:]
         return {"configured": True, "masked": masked}

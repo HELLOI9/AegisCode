@@ -42,12 +42,26 @@ def test_get_key_none_when_nothing_configured():
     cs = CredentialStore(FakeBackend())
     assert cs.get_key() is None
 
-def test_masked_format_short_key():
+def test_masked_short_key_fully_hidden():
+    # "sk-1234" (7 chars): prefix+suffix would reconstruct the whole key,
+    # so it must be fully masked to "***".
     b = FakeBackend(); cs = CredentialStore(b); cs.set_key("sk-1234")
     st = cs.status()
     assert st["configured"] is True
+    assert st["masked"] == "***"
     assert "sk-1234" not in str(st)
-    assert st["masked"].endswith("1234")
+
+def test_masked_length_boundary():
+    # 7-char key -> fully masked; 8-char key -> prefix/suffix form.
+    b7 = FakeBackend(); cs7 = CredentialStore(b7); cs7.set_key("1234567")
+    assert cs7.status()["masked"] == "***"
+    b8 = FakeBackend(); cs8 = CredentialStore(b8); cs8.set_key("12345678")
+    assert cs8.status()["masked"] == "123…5678"
+
+def test_dotenv_strips_double_quotes(tmp_path):
+    p = tmp_path / ".env"; p.write_text('OPENAI_API_KEY="sk-quoted"\n')
+    cs = CredentialStore(FakeBackend(), allow_dotenv=True, dotenv_path=str(p))
+    assert cs.get_key() == "sk-quoted"
 
 def test_clear_swallows_backend_errors():
     class ErrorBackend(FakeBackend):
