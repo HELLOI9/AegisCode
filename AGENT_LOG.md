@@ -194,3 +194,12 @@
   - 以上四项在 7b7dbe4 全修,150 passed 纯净。
 - **人工干预**:控制器发现 subagent API 错误,检查磁盘产物,确认可续;亲读 §6 +dispatcher 确认 FINISH_REJECTED 语义为"反馈继续"而非"终止";在修复工单中注入这一条;其余由续传 subagent 完成。
 - **MockLLM 离线确定性**:全部 demo 测试用 scripted MockLLM,零网络/零真 LLM。
+
+### M4 全分支最终评审(opus)— CHANGES REQUIRED → 已解决 (12f13fd)
+- **Critical 1**:governance factory 无 run_tests 分支 → 落入 TIER_DEFAULT → DENY。但 SPEC §6 明列 run_tests 为"反馈传感器",必须能执行。修:在 build_default_fn 加 TIER_SENSOR 分支,run_tests → ALLOW。
+- **Critical 2 / 测试戏剧**:demo2 断言 `"fail" in m.lower()` 被 POLICY_DENIED 反馈里的"fail-closed"字面命中而通过,掩盖了 Critical 1。修:去掉 or 分支,断言 `"TEST_FAILURE" in m`;增补 `spy.run_tests_executions >= 2`(证传感器真跑了)与 round-2 FEEDBACK 事件 category==TEST_FAILURE(证真机制)。修 C1 后 demo2 因正确原因通过。
+- **Important 3**:INTERNAL_ERROR 已定义但从未被设置。修:run() 每轮包 try/except Exception → audit + return INTERNAL_ERROR(fail-safe,不允许 run() 崩溃调用方);新增故意抛异常 dispatcher 的测试证实。
+- **Important 4**:CANCELLED 无机制 + 记忆 TODO 只在 AGENT_LOG 未在源码。修:构造函数接受 cancel_check callable,循环首行检查,置 CANCELLED audit + return;记忆 TODO 已加到 build_context 调用处,为 T26 ApplicationService 留 seam。
+- 12f13fd 一提交合修四项,153 passed,`-W error::DeprecationWarning` 纯净。
+- **人工干预**:控制器直接验证 C1(python3 -c 复现 run_tests→DENY),读 SPEC §6 line 126 确认 run_tests 传感器身份,注入修复工单;C2 靠人工阅读 demo2 与 helpers 交叉核实"fail-closed"字面误命中假设并要求同时收紧断言 + 加真实执行 spy 证据。
+- **跟踪(后续)**:approval_resolver 是同步回调,不足以承载 §6 "审批暂停+持久化+跨界恢复",T26 ApplicationService 需要 resume-capable entry(非阻塞式);memory 集成本身仍是 TODO(仅接进 seam,retrieve 未调用)。
