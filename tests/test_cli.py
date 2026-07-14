@@ -194,3 +194,24 @@ def test_serve_binds_localhost_and_prints_notice(tmp_path, capsys, monkeypatch):
     assert captured["host"] == "127.0.0.1"
     out = capsys.readouterr().out.lower()
     assert "localhost" in out or "127.0.0.1" in out
+
+
+# --------------------------------------------------------------------------
+# Console-script entry point: `main()` must work with NO args.
+# Regression guard for the setuptools entry `aegiscode = aegiscode.cli:main`,
+# which calls main() with zero arguments. A missing argv default made every
+# real `aegiscode ...` invocation (incl. the Docker CMD `aegiscode serve`)
+# crash with TypeError before this was fixed. All other tests pass argv
+# explicitly, so this path was previously unguarded.
+# --------------------------------------------------------------------------
+
+
+def test_main_no_args_reads_sys_argv(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("AEGIS_HOME", str(tmp_path))
+    # Simulate the console script: `aegiscode key status` with main() called
+    # with no positional argv (setuptools convention).
+    monkeypatch.setattr("sys.argv", ["aegiscode", "key", "status"])
+    rc = main()  # must NOT raise TypeError
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert "not configured" in out or "configured: false" in out

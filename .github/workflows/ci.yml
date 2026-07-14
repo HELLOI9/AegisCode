@@ -1,0 +1,39 @@
+# GitHub Actions mirror of .gitlab-ci.yml (the GitHub-hosted repo runs THIS).
+# Same three gates: unit-test -> secret-scan -> docker-build.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: make test
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      # Authoritative deterministic gate (self-written, allowlisted).
+      - run: python scripts/ci_secret_scan.py
+      # Secondary backstop; never masks the primary gate above.
+      - name: gitleaks (backstop)
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t aegiscode .

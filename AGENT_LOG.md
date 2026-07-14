@@ -280,3 +280,38 @@
 - **I-2(Important,已修 46874b6)**:async pause/resume 从未经 API 层测试(所有 API 测试 sync=True)——正是掩盖 I-1 的集成缺口。补:make_async_api_client(sync=False)+ 两条 HTTP 端到端测试(approve → COMPLETED + 行 APPROVED + chain_valid;reject → 副作用断言 secret.txt 永不落盘 + 行 REJECTED),_poll_http 5s 硬上限防挂。RED 揭示真实行为事实:reject 的写被拒但循环仍可 finish(治理拒的是动作非整轮),故 reject 断言改用确定性副作用。
 - **人工干预**:控制器将 I-1/I-2 从"fast-follow 建议"升级为合并前必修(理由:两者都落在本里程碑主推的 serve async 审批路径,且 AegisCode 以审批正确性为卖点);I-1 一行内核修复由控制器直接落地并加 doc 注释,I-2 派 subagent 补 API 层回归测试(同时守护 I-1)。
 - **Minor(未阻塞,记录留待清理)**:test_app_service 若干 vacuous 断言(state in 全集 / step_count>=0;机制实为别处严格断言覆盖);redact 未传 workspace_root(绝对路径相对化分支未启用,当前工具皆相对路径无泄漏);test_run_openai 双调 capsys.readouterr()。
+
+---
+
+## 2026-07-14 · Milestone 7(分发与演示)— 新 worktree
+**Worktree**:`.claude/worktrees/m7-distribution`,分支同名(base = main @ 7d42001,M0-M6 已并入)。基线 make test = 233。链:T30 Dockerfile → T31 四机制演示 → T32 CI。实现/评审 sonnet。
+
+### Task 30 · Dockerfile + keyring 运行时降级 — ✅ 完成 (1876545, +342fa8e)
+- **技能**:subagent-driven-development;实现/评审 sonnet。
+- **TDD**:RED = Dockerfile/.dockerignore 不存在,4 测试 FileNotFoundError 全红;GREEN = 实现后 4/4 绿,237 total。
+- **产物**:`Dockerfile`(python:3.12-slim,`COPY pyproject.toml + aegiscode/`,`pip install --no-cache-dir -e .`,`EXPOSE 8000`,exec-form `CMD ["aegiscode","serve","--host","0.0.0.0","--port","8000"]`)+ `.dockerignore`(排除 .git/.venv/tests/docs/.env/.env.*/*.pem/*.key/*.db/*.sqlite*/__pycache__/.superpowers/.claude)+ `tests/test_docker_build.py`(4 文本级测试,不需 docker daemon)。
+- **安全(SPEC §19 / 决策 #19)**:key 绝不进镜像层(无 `ENV *_KEY`、无 `COPY .env`),运行时 `-e` 注入;workspace `-v host:/workspace` 挂载;容器内 keyring 不可用自动回退 env(T24 `get_key` try/except 已处理)。
+- **两阶段评审**:Stage1 SPEC 合规 ✅(key 不烤入、serve 0.0.0.0:8000、editable install 依赖齐全、webui 静态资源随 `COPY aegiscode` 进镜像且 editable 安装直读源码树)。Stage2 质量 — **1 Important(test theater)**:`assert "aegiscode serve" in df` 仅靠头部注释满足(exec-form CMD 把 token 拆成 JSON 数组元素,连续子串不在 CMD 行),删掉整个 CMD 行测试仍绿 → 守卫核心运行时不变量却验的是注释。
+- **人工干预(控制器亲自修)**:强化测试断言 exec-form CMD 各 token(`"aegiscode"`/`"serve"`/`"--host"`/`"0.0.0.0"`/`"--port"`/`"8000"`,删/乱序/shell-form 即失败);修 `ENV not in df or API_KEY not in df` 的重言式断言;强化 .dockerignore 测试断言 `*.pem`/`*.key`/`*.db`——**该强化测试立刻抓出真实缺陷**:提交的 .dockerignore 实际不含 `*.pem`/`*.key`(子智能体报告声称已加但提交文件不符,与 M6 的报告-实际漂移同源),已补齐。呼应教训6(守卫必须打在最脆弱的真实路径,不能靠注释/报告自我掩盖)。
+
+### Task 31 · 四个机制演示(§16.4,MockLLM 驱动零网络)— ✅ 完成 (dc8c313, +091440c, +78d4d9f)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet,修复 sonnet。
+- **TDD**:RED = `from demos import ...` ModuleNotFoundError;GREEN = 4 demo 测试绿,242 total;audit 修复后 demo1/3 强化断言 RED(KeyError audit_has_deny)→GREEN;entry-point 回归测试 +1 → 243 total。ruff 干净,零网络全 MockLLM。
+- **产物**:`demos/demo1_dangerous_denied.py`(rm -rf → DENY)、`demo2_feedback_loop.py`(错误实现→run_tests 失败→修正→通过→finish,最终验证器复跑绿)、`demo3_symlink_escape.py`(evil→/etc/passwd 软链 → PATH_FENCE DENY 无泄漏)、`demo4_superseded.py`(指纹变→SupersededError,相同仍验证通过)。`tests/demos/test_demos.py`。CLI `_cmd_demo` 跑全四个。Dockerfile `COPY demos ./demos`(演示随镜像发布,`aegiscode demo` 可跑)。
+- **自包含设计**:各 demo 内联最小装配,不 import tests/helpers → 不受 .dockerignore 排除 tests/ 影响。demo② 用真实子进程(RunTestsTool subprocess)跑 `python check.py`,check 用 exec 原始字节(无 import 缓存)→ 消除 .pyc Heisenbug(评审 42 次确定性运行 0 失败验证)。
+- **两阶段评审**:Stage1 SPEC + Stage2 anti-theater。0 Critical;评审用 3 个 falsification probe(ProbeA/B/C)独立证明每条断言机制断则测试失败(demo② COMPLETED 由 final_verifier 复跑赢得非 MockLLM 声称,ProbeC 强制写错→LLM_ERROR 非 COMPLETED)。**2 Important**:demo①/③ 缺 §16.4 强制的 audit GOVERNANCE_DECISION=DENY+rule_id 断言、demo① 缺 POLICY_DENIED feedback 断言。
+- **修复(091440c)**:demo①/③ 改为驱动真实 HarnessCore + AuditLog(仿 demo② 模板),经真实 AuditEventRepository 读回事件断言 audit_has_deny/deny_rule_id/feedback_is_policy_denied/no_tool_executed。limits max_steps=1 使第 2 轮 MAX_STEPS 终止,确定性无 LLM_ERROR。真实 harness 完整发出 §16.4 所需事件,无 SPEC 缺口。
+- **人工干预(重大)**:子智能体越界改 cli.py 被判定为**正当**——挖出 T29 遗留真实 bug:console script `aegiscode = aegiscode.cli:main` 无参调用 `main()`,但 `def main(argv)` 无默认值 → 所有 `aegiscode ...`(含 Docker `CMD ["aegiscode","serve"]`)启动即 TypeError 崩溃;T29 测试全部显式传 argv 故从未触及真实入口,T30 Dockerfile 评审假设"服务会启动"未跑 console script。控制器确认修复(argv=None→sys.argv[1:])并补零参入口回归测试(78d4d9f),防 docker run 再次静默崩溃。
+- **安全/确定性**:全部 MockLLM 零网络;demo③ 反 vacuous 守卫(断言软链 realpath 确实指向 /etc/passwd + 无 root: 泄漏)。
+
+### Task 32 · CI 流水线(unit-test + 密钥扫描 + docker build)— ✅ 完成 (3698399, +966e95d)
+- **技能**:subagent-driven-development;实现 sonnet,两阶段评审 sonnet。
+- **TDD**:RED = CI 文件 + scripts/ci_secret_scan.py 不存在,6 测试全红;GREEN = 实现后 6/6 绿,249 total;评审 fix 后 8 测试、251 total、ruff 干净。
+- **产物**:
+  - `.gitlab-ci.yml`(签字 PLAN 指定):stages=[test, security, build];`unit-test`(job 名精确匹配决策 #23)→ `pip install -e ".[dev]"` + `make test`;`secret-scan` → `python scripts/ci_secret_scan.py`(权威闸)+ gitleaks 兜底(`|| echo` 守护,缺二进制不掩盖主判定);`docker-build` → `docker build`。
+  - `.github/workflows/ci.yml`(**增值镜像**,非 PLAN 偏离):因 repo 托管于 GitHub,GitLab CI 不会执行;镜像三 job 同构 + gitleaks-action 兜底(continue-on-error),`on: [push, pull_request]` 真正在本 repo 跑起来。PR 描述注明。
+  - `scripts/ci_secret_scan.py`:自写确定性闸,复用 T25 `scan_paths`(与脱敏共享同一批正则),仅扫发行面(`aegiscode/`+`demos/`,60 文件),排除 `tests/`(故意假密钥 fixture,且 `.dockerignore` 排除 tests/docs = 不入镜像)。行钉 `ALLOWLIST`=[(assembly.py, 43)](`key = credential_store.get_key()` 的 16 字符标识符 `credential_store` 命中 `(?i)KEY=<16+>`,非真密钥);其余任何位置的同串仍失败(fail-safe)。可 import,`main(argv=None)->int`。
+- **安全 / anti-theater**:评审独立跑 plant→scan→delete 证伪:干净→exit0;植入 `aegiscode/_probe_leak.py` 带真 `sk-<40>`→exit1 且点名文件;删除→exit0,无残留。闸真会在发行面拦真密钥。
+- **两阶段评审**:Stage1 SPEC ✅(unit-test/make test/secret-scan/docker-build 齐全、stages 正确、GitHub 镜像会触发);Stage2 质量 — 0 Critical。**1 Important**:`test_scan_gate_is_not_vacuous` 只测底层正则,未测闸真实路径(shipped 遍历 + allowlist + 退出码)→ 提交的测试自身不承载 anti-theater 证明。Minor:allowlist 行钉(非宽泛,已验证仅抑制那一行)、tests/ 排除面 = 非发行面(与 .dockerignore 一致)、PyYAML `on:` 解析为布尔键(不影响 Actions 执行与测试)。
+- **控制器修复(966e95d)**:强化测试——monkeypatch `REPO_ROOT` 到 temp 树,植入带真密钥的 `aegiscode/leak.py`,断言 `main([]) == 1` 走**完整**遍历+allowlist+退出码路径;补 allowlist 机制测试(仅钉住行被抑制,同串在别处仍失败)。杀掉 regex-only 剧场。251 total 绿。
+- **人工干预**:①识别 PLAN 天真快照 `scan_paths(glob('**/*.py'))` 会因 tests/ 故意 fixture 假阳(实测发行面外 54 命中)→ 设计上把闸 scope 到发行面 + 行钉 allowlist,而非削弱 T25 扫描器(其激进正则是脱敏共享资产,测试已钉);②补 GitHub Actions 镜像使 CI 在 GitHub repo 真跑;③强化 anti-theater 测试。

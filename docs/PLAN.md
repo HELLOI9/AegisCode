@@ -2691,7 +2691,7 @@ git commit -m "feat: CLI init/run/serve/config/key/demo"
 
 ## Milestone 7 — Distribution & Demos
 
-### Task 30: Dockerfile + keyring fallback
+### Task 30: Dockerfile + keyring fallback ✅ DONE (1876545, +342fa8e)
 
 **Files:**
 - Create: `Dockerfile`, `.dockerignore`, `tests/test_docker_build.py` (optional smoke, marked slow)
@@ -2740,7 +2740,7 @@ git commit -m "feat: Dockerfile (runtime key injection, /workspace mount)"
 
 ---
 
-### Task 31: Mechanism demos (§A.6, four demos)
+### Task 31: Mechanism demos (§A.6, four demos) ✅ DONE (dc8c313, +091440c, +78d4d9f)
 
 **Files:**
 - Create: `demos/demo1_dangerous_denied.py`, `demos/demo2_feedback_loop.py`, `demos/demo3_symlink_escape.py`, `demos/demo4_superseded.py`, `tests/demos/test_demos.py`; Modify: `aegiscode/cli.py` (`demo` runs all four)
@@ -2780,7 +2780,7 @@ git commit -m "feat: four MockLLM mechanism demos (dangerous/feedback/symlink/su
 
 ---
 
-### Task 32: CI pipeline (unit-test job + secret scan + docker build)
+### Task 32: CI pipeline (unit-test job + secret scan + docker build) ✅ DONE (3698399, +966e95d)
 
 **Files:**
 - Create: `.gitlab-ci.yml`
