@@ -12,6 +12,10 @@ WORKDIR /app
 # Copy only what the editable install needs (package metadata + source).
 COPY pyproject.toml ./
 COPY aegiscode ./aegiscode
+# Ship the four SPEC §16.4 mechanism demos so `aegiscode demo` runs in-container.
+# The demos import ONLY the aegiscode package + stdlib (never tests/), so they
+# work here even though .dockerignore excludes tests/.
+COPY demos ./demos
 
 RUN pip install --no-cache-dir -e .
 

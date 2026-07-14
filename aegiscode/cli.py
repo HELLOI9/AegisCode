@@ -223,59 +223,71 @@ def _cmd_serve(args) -> int:
 
 
 # --------------------------------------------------------------------------
-# demo — self-contained, zero-network governance interception
+# demo — self-contained, zero-network mechanism demos (SPEC §16.4 / §A.6)
 # --------------------------------------------------------------------------
 
 
 def _cmd_demo(args) -> int:
-    """Prove governance DENIES `rm -rf /` and the tool NEVER executes.
+    """Run all four SPEC §16.4 mechanism demos and report PASS/FAIL per demo.
 
-    Builds a real dispatcher over a real ToolRegistry, drives one MockLLM step,
-    parses its action, and dispatches it. Asserts DENY + no execution.
+    Each demo lives in the top-level ``demos`` package, is fully self-contained
+    (no test-helper imports), zero-network (MockLLM only), and exercises a REAL
+    governance / harness / approval mechanism:
+
+      demo①  governance DENIES ``rm -rf /`` (tool never executes)
+      demo②  failure feedback drives an action change → verified COMPLETED
+      demo③  path fence DENIES a symlink escape to /etc/passwd
+      demo④  a changed action after approval is SUPERSEDED
+
+    Returns 0 iff all four satisfy their run() contract; 1 otherwise.
     """
-    import tempfile
-    from types import SimpleNamespace
+    import aegiscode
 
-    from aegiscode.governance.decision import Decision
-    from aegiscode.governance.factory import build_dispatcher
-    from aegiscode.llm.mock import MockLLM
-    from aegiscode.protocol.parser import parse_action
-    from aegiscode.tools.registry import ToolRegistry
-    from aegiscode.tools.result import ToolResult
+    # The demos package sits at the repo root (next to the aegiscode package),
+    # both in a source checkout and inside the container (COPY demos ./demos).
+    # Ensure that root is importable regardless of the current working dir.
+    repo_root = Path(aegiscode.__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
 
-    executed = {"count": 0}
-
-    class SpyCommandTool:
-        name = "run_command"
-
-        def run(self, arguments, ctx):  # pragma: no cover — must NEVER run
-            executed["count"] += 1
-            return ToolResult(tool=self.name, status="success", summary="ran")
-
-    cfg = AegisConfig()
-    registry = ToolRegistry()
-    registry.register(SpyCommandTool())
-    dispatcher = build_dispatcher(cfg, registry)
-
-    llm = MockLLM(['{"tool":"run_command","arguments":{"command":"rm -rf /"}}'])
-    raw = llm.complete([{"role": "user", "content": "go"}])
-    action = parse_action(raw)
-
-    with tempfile.TemporaryDirectory() as ws:
-        ctx = SimpleNamespace(workspace_root=ws, resolve=lambda p: p)
-        verdict, result = dispatcher.dispatch(action, ctx)
-
-    ok = verdict.decision == Decision.DENY and executed["count"] == 0
-    if not ok:
-        print(
-            f"FAIL: decision={verdict.decision.value} executions={executed['count']}",
-            file=sys.stderr,
+    try:
+        from demos import (
+            demo1_dangerous_denied,
+            demo2_feedback_loop,
+            demo3_symlink_escape,
+            demo4_superseded,
         )
+    except ModuleNotFoundError as exc:  # pragma: no cover - packaging guard
+        print(f"cannot load demos package: {exc}", file=sys.stderr)
         return 1
 
-    print("PASS: governance intercepted `rm -rf /` — "
-          f"decision=DENY ({verdict.rule_id}), tool NOT executed")
-    return 0
+    # (label, module, contract predicate on the returned dict)
+    demos = [
+        ("demo①", demo1_dangerous_denied,
+         lambda r: r == {"executed": 0, "decision": "DENY"}),
+        ("demo②", demo2_feedback_loop,
+         lambda r: r.get("completed") and r.get("action_changed")),
+        ("demo③", demo3_symlink_escape,
+         lambda r: r.get("decision") == "DENY"),
+        ("demo④", demo4_superseded,
+         lambda r: r.get("superseded") is True),
+    ]
+
+    all_ok = True
+    for label, module, contract in demos:
+        try:
+            result = module.run()
+            passed = bool(contract(result))
+        except Exception as exc:  # noqa: BLE001 - a crashing demo is a FAIL
+            all_ok = False
+            print(f"{label}: FAIL ({type(exc).__name__}: {exc})", file=sys.stderr)
+            continue
+        all_ok = all_ok and passed
+        status = "PASS" if passed else "FAIL"
+        stream = sys.stdout if passed else sys.stderr
+        print(f"{label}: {status} {result}", file=stream)
+
+    return 0 if all_ok else 1
 
 
 # --------------------------------------------------------------------------

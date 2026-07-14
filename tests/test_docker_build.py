@@ -48,6 +48,15 @@ def test_dockerfile_copies_no_secrets():
         assert f"env {token}" not in lowered
 
 
+def test_dockerfile_ships_demos():
+    # `aegiscode demo` runs the four SPEC §16.4 mechanism demos, which live in
+    # the top-level `demos` package. The runtime image must COPY it in, or the
+    # graded demo command fails inside the container (tests/ is .dockerignored,
+    # so the demos deliberately do NOT depend on tests/).
+    df = pathlib.Path("Dockerfile").read_text()
+    assert "COPY demos ./demos" in df, "Dockerfile must COPY demos into the image"
+
+
 def test_dockerignore_excludes_secrets_and_cruft():
     di = pathlib.Path(".dockerignore").read_text()
     # cruft + credential-bearing files must never enter the build context
