@@ -382,3 +382,36 @@
 - **两阶段评审**:Stage1 SPEC ✅(unit-test/make test/secret-scan/docker-build 齐全、stages 正确、GitHub 镜像会触发);Stage2 质量 — 0 Critical。**1 Important**:`test_scan_gate_is_not_vacuous` 只测底层正则,未测闸真实路径(shipped 遍历 + allowlist + 退出码)→ 提交的测试自身不承载 anti-theater 证明。Minor:allowlist 行钉(非宽泛,已验证仅抑制那一行)、tests/ 排除面 = 非发行面(与 .dockerignore 一致)、PyYAML `on:` 解析为布尔键(不影响 Actions 执行与测试)。
 - **控制器修复(966e95d)**:强化测试——monkeypatch `REPO_ROOT` 到 temp 树,植入带真密钥的 `aegiscode/leak.py`,断言 `main([]) == 1` 走**完整**遍历+allowlist+退出码路径;补 allowlist 机制测试(仅钉住行被抑制,同串在别处仍失败)。杀掉 regex-only 剧场。251 total 绿。
 - **人工干预**:①识别 PLAN 天真快照 `scan_paths(glob('**/*.py'))` 会因 tests/ 故意 fixture 假阳(实测发行面外 54 命中)→ 设计上把闸 scope 到发行面 + 行钉 allowlist,而非削弱 T25 扫描器(其激进正则是脱敏共享资产,测试已钉);②补 GitHub Actions 镜像使 CI 在 GitHub repo 真跑;③强化 anti-theater 测试。
+
+---
+
+## 2026-07-14 · 项目级最终评审 + 收尾修复(Milestone 8 · Hardening）— 新 worktree
+**Worktree**:`.claude/worktrees/m8-hardening`,分支同名(base = main @ 0540dba,M0-M7 32 task 全并入)。基线 make test = 251。技能:`requesting-code-review`(项目级,非单 task)+ subagent-driven-development + 严格 TDD。
+
+### 项目级最终评审(§一）— 4 个并行只读 subagent 分片覆盖检查清单
+控制器判定:单个 reviewer 覆盖 32-task/251-test 全库过浅,故派 **4 个并行只读评审 subagent**,各领一片 §一 清单,全部 read-only(不动工作树/index/HEAD):
+- **片1 主循环 + MockLLM + 停机**:确认主循环 `while True` 由 AegisCode 自写(harness.py:60),无 Agent SDK 依赖;MockLLM FIFO 纯离线确定性;停机四路(invalid/consecutive/no-progress/max-steps)优先级正确无 off-by-one;COMPLETED 靠 final_verifier 复跑客观验证非 LLM 声称。**发现 Important**:循环无 wall-clock 超时 + `urlopen` 无 `timeout=` → 真实 provider 可无限挂起(§一明列"超时"为必需停机条件)。
+- **片2 凭据泄漏全面**:确认 redact-before-hash 顺序正确(chain.py:17→23→27);适配器仅把 key 放出站 header 不 log;500 handler 泛化;CLI/status 全掩码;文件后端 0600/0700;镜像不烤 key;git 历史干净。**发现 Important**:redactor+scanner 漏 `sk-proj-`/`sk-svcacct-`(正则无 `-_`)与带引号赋值 → 审计脱敏与 CI 闸盲区;Dockerfile 绑 0.0.0.0 与"localhost-only"文档矛盾。
+- **片3 治理绕过(甲命令 / 乙路径 / 审批绑定)**:确认路径围栏对 file tools robust(realpath+commonpath+resolved-sensitive);REQUIRE_APPROVAL 零执行;DENY 执行前中止;matcher 异常 fail-closed。**发现 3 Critical + 2 Important**(下详),控制器逐条独立复现(非只信 subagent)。
+- **片4 反馈 / 记忆 / 状态一致性 / 确定性**:确认反馈回灌真实到达下一轮 LLM(test_demo2 断言);COMPLETED 客观;WebUI XSS 安全(textContent);状态单一 sqlite 源。**发现 Important**:记忆子系统建好且单测通过但 `harness._build` 传 `memories=[]`(TODO)未接入主循环;`POST /tasks` 的 workspace 是调用方任意绝对路径。
+
+### Critical(治理绕过,控制器独立复现于 shipped 默认)— 全部已修
+- **C1(已修 2c92fa3)**:`python3` 绕过命令规则。allowlist 含 `python3` 但规则仅 `argv0=="python"`,`command_rules` 精确匹配 → `python3 -m http.server` 实测 ALLOW,可跑任意解释器(RCE)。修:`_norm_argv0` 把 `python3`/`python3.12` 折叠为 `python` 仅用于规则匹配(执行的真实 argv0 不变)。
+- **C2(已修 2c92fa3)**:紧贴式短选项绕过 `-c` DENY。`shlex.split("python -c'import os'")→['python','-cimport os']`,token `-c` 不作独立元素 → 规则 `-c in args` 不命中 → ALLOW。修:`_arg_matches` 让短选项规则 token 命中独立 `-c` 或紧贴 `-cFOO`(`arg.startswith(tok)`,`--long` 不误入)。
+- **C3(已修 57a6c16)**:`run_command` 无路径围栏。`_FILE_TOOLS` 不含 run_command → `cat /etc/passwd`/`cat .env` 实测 ALLOW,绕过敏感文件围栏。修:(a)schema 默认 allowlist 移除 `cat`/`ls`(通用读取器能吃任意路径);(b)dispatcher 新增 `run_command` 路径围栏(`_is_path_like`+`_fence_command`,复用 lex_command+check_path,dispatch/execute_approved 两处),路径型 token 逃逸/敏感即 DENY 不执行。
+
+### Important — 全部已修
+- **I1(已修 2c92fa3)**:`git reset --h` 缩写绕过 `--hard` DENY(git 接受无歧义缩写)。修:`_arg_matches` 长选项规则 token 命中其 `>2` 字符前缀(`--h`/`--ha`)与 `--hard=value` 形式;`--soft` 不误命中 `--hard`。
+- **I2(已修 2c92fa3)**:`judge_command` 首个匹配即返回,DENY 不具支配性——用户改 YAML 把 ALLOW 排在 DENY 前可静默降级。修:扫描所有命中规则,按严重度阶梯 `DENY>REQUIRE_APPROVAL>ALLOW_WITH_AUDIT>ALLOW` 取最严者。
+- **审批指纹绑定接入主循环(已修 a952e1f,Demo 3 依赖)**:`validate_resume`/`fingerprint`/SUPERSEDED 原本仅单测覆盖、未接主循环——harness 把同一 action 对象传 resolver 与 execute_approved,绑定靠对象同一性"碰巧安全"。修:harness 在 REQUIRE_APPROVAL 处捕获 `approved_fp=fingerprint(action)`,`execute_approved(action,ctx,approved_fp=)` 内 `validate_resume` 校验,改动过的动作触发 SupersededError → 返回 denied ToolResult(`artifacts.superseded=True`)+ 审计 APPROVAL_DECIDED/SUPERSEDED + POLICY_DENIED 反馈 + continue 重新判定,绝不执行。控制器独立复现:相同动作执行、改参动作 denied+superseded+不执行。
+- **循环 wall-clock 超时 + urlopen timeout(已修 4eeaeb1)**:`Limits.wall_clock_timeout_sec=300`;`decide_termination(c,limits,elapsed_sec=)` 最先检查超时(硬外界界,优先于所有计数器),harness `time.monotonic()` 注入 elapsed(纯函数确定性,key 缺省则跳过=向后兼容);openai_adapter `HTTP_TIMEOUT_SEC=60` 传 `urlopen(timeout=)`,anthropic 复用 `_real_post` 一并覆盖。
+- **凭据脱敏正则补全(已修 21a0ee1)**:redactor `OPENAI_KEY=sk-[A-Za-z0-9_-]{20,}`(含 `_-` 覆盖 proj/svcacct,并归并 legacy/ant);`GENERIC_ASSIGNMENT` 加可选引号 `['\"]?` 捕获 `KEY="..."`;`KEY_PATTERNS` 单一真源,scanner 从 redactor import 防漂移。控制器独立验证:proj/svcacct/legacy/ant/带引号全脱敏,benign 不误报,CI 闸仍 0 findings。
+- **POST /tasks workspace 路径围栏(已修 594e32e)**:`Workspace.allowed_base`(None=der 自 root);`create_task` 插行前 `_validate_workspace`(realpath+commonpath,symlink 安全、兄弟前缀安全),越界 → `WorkspaceNotAllowedError`→ API 400 且不建 task;CLI 受信操作者显式 `--workspace` 即 allowed_base。控制器验证:根/etc/兄弟前缀/相对/软链全 REJECT,base+子目录 ACCEPT。
+- **pyproject starlette 可移植性(已修 b996d7b)**:`filterwarnings` 第 19 行 `ignore::starlette.exceptions.StarletteDeprecationWarning` 是**死配置**(该类是 UserWarning 非 DeprecationWarning 子类,第 18 行 `error::DeprecationWarning` 从不升级它),唯一作用是启动 eager import→在缺该符号的旧 starlette(0.5x)崩 pytest 收集。删之。控制器验证:基线崩溃的 conda py3.13/starlette 0.52 env 现能收集全 283 test。
+- **记忆检索接入主循环(已修 1394194)**:`harness._build` 的 `memories=[]` TODO 替换为 `_retrieve_memories()`——`HarnessCore(memory_store=,project_id=)`,retrieve top-k 后经 `is_governance_usable` 过滤(source=agent 记忆"仅提示、永不作治理依据"→ 排除),assembly 构 `MemoryStore(conn)` + `project_id=_workspace_hash(workspace)` 注入。控制器端到端验证:confirmed 记忆到达 LLM 上下文,agent 猜测被过滤。ci_secret_scan allowlist 行钉 43→44(import 位移 `key=credential_store.get_key()`,已核对 line 44 确为该行)。
+
+### 评审方法论与人工干预
+- **控制器逐条独立复现**:C1/C2/C3/I1 均以 `/tmp/verify_gov.py` 打真实 `Governance()` shipped 默认复现绕过(非只信 subagent),修后同脚本确认闭合 + 非回归(`--soft` 不误 DENY、`pip install` 仍 REQUIRE_APPROVAL、`python3 script.py` 仍 ALLOW)。
+- **每次修复重跑**:定向红队测试 → 模块测试 → 全量 → 相关机制(治理复现脚本 / CI 闸 / 记忆端到端)。全量 251→264→276→283→303→311→315,逐步递增无回归。
+- **决策关口(AskUserQuestion)**:治理绕过修复深度=彻底加固;超时+脱敏正则=都修;记忆接入=先核对 PLAN/SPEC 再定(结论:SPEC §524/§537 M10 验收为单测口径已满足,但 T23 显式依赖 T21 且 §一 要求"记忆闭环",`build_context` 本已接主循环仅 `memories=[]` 硬编码 → 接入,低风险~10 行);WebUI 公网部署=先修 workspace 围栏、部署待定。
+- **并行 subagent 同 worktree**:片19(脱敏)片20(workspace)触及 disjoint 文件并行跑,控制器分两次提交(21a0ee1 / 594e32e)分离关注点;C1/C2/I1/I2 因同处 judge_command 作为一个 TDD 单元(2c92fa3)避免串行抖动同函数。
