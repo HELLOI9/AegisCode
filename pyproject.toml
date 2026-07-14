@@ -14,7 +14,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["aegiscode*"]
 [tool.pytest.ini_options]
+# NOTE: do NOT add `ignore::starlette.exceptions.StarletteDeprecationWarning`
+# here. pytest imports the warning category eagerly at startup, and that symbol
+# does not exist on every starlette release — a clean install that resolves to a
+# starlette without it makes pytest crash at collection. The class is also a
+# UserWarning subclass (not a DeprecationWarning), so `error::DeprecationWarning`
+# never escalates it anyway; the ignore was inert. Keep filters class-portable.
 filterwarnings = [
     "error::DeprecationWarning",
-    "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]
