@@ -1,6 +1,6 @@
 # AegisCode — 验收追溯矩阵 (ACCEPTANCE)
 
-本文件把课程验收清单(见 `docs/SPEC.md` §15 与 acceptance spec §十)的每条要求映射到**可定位的真实证据**:实现文件、自动化测试(文件 + 函数名)、演示/证据命令、状态。每个单元格都是可 grep / 可复跑的引用,而非「已完成」空话。基线数据(本 worktree `m8-hardening`,`./.venv/bin/python` 复跑):`make test` → **321 passed, 1 warning**;`make demo`(`python -m demos.run_demos`)→ **3 passed, 0 failed (exit 0)**。
+本文件把课程验收清单(见 `docs/SPEC.md` §15 与 acceptance spec §十)的每条要求映射到**可定位的真实证据**:实现文件、自动化测试(文件 + 函数名)、演示/证据命令、状态。每个单元格都是可 grep / 可复跑的引用,而非「已完成」空话。基线数据(本 worktree `m8-hardening`,`./.venv/bin/python` 复跑):`make test` → **325 passed, 1 warning**;`make demo`(`python -m demos.run_demos`)→ **3 passed, 0 failed (exit 0)**。
 
 ---
 
@@ -13,7 +13,7 @@
 | 危险动作拦截(DENY) | `aegiscode/governance/command_rules.py`(`judge_command`,5 层管线)+ `command_lexer.py` + `engine.py` | `tests/governance/test_command_rules.py`(`test_rm_denied_by_metastructure_or_allowlist` / `test_python_dash_c_denied` / `test_pipe_denied`)、`test_command_bypass.py`(`test_c1_python3_dash_m_denied` 等旁路加固) | Demo 1 `demos/demo1_dangerous_denied.py`(`rm -rf /` → DENY,tool 执行次数=0,审计 GOVERNANCE_DECISION=DENY 带 rule_id) | ✅ 通过 |
 | 失败反馈回灌 | `aegiscode/loop/harness.py`(反馈写入下一轮 `last_feedback`/上下文)+ `aegiscode/feedback/classifier.py`(`classify`,`TEST_FAILURE` 等 8 类)+ `pytest_parser.py` | `tests/feedback/test_classifier.py`(`test_classify_test_failure` / `test_summarize_pytest_keeps_failed_names`)、`tests/loop/test_harness.py::test_demo2_failure_feedback_changes_action` | Demo 2 `demos/demo2_feedback_loop.py`(失败反馈进入下一轮 MockLLM messages,轮3 动作≠轮1,COMPLETED 由最终验证复跑判定) | ✅ 通过 |
 | 审批绑定与失效(HITL) | `aegiscode/governance/approval.py`(`fingerprint`、`validate_resume`、`ApprovalState.SUPERSEDED`、`remember`/`check_remembered`) | `tests/governance/test_approval_binding.py`(`test_execute_approved_same_fingerprint_runs` / `test_execute_approved_changed_fingerprint_superseded`)、`tests/loop/test_approval_binding.py`、`tests/governance/test_approval.py` | Demo 3 `demos/demo3_approval_binding.py`(暂停时 0 执行 → 批准执行原始快照 → 改指纹 SUPERSEDED 不执行 → 审计全流程) | ✅ 通过 |
-| 统一测试命令 | `Makefile`(`test:` → `pytest -q`) | 全套 `tests/`(321 passed) | `make test` → 321 passed | ✅ 通过 |
+| 统一测试命令 | `Makefile`(`test:` → `pytest -q`) | 全套 `tests/`(325 passed) | `make test` → 325 passed | ✅ 通过 |
 | 统一演示命令 | `Makefile`(`demo:` → `python -m demos.run_demos`)+ `demos/run_demos.py` | `tests/demos/test_run_demos.py`、`tests/demos/test_demos.py`、`tests/demos/test_demo3_approval_binding.py` | `make demo` → "AegisCode mechanism demos: 3 passed, 0 failed" | ✅ 通过 |
 | 凭据安全(生命周期) | `aegiscode/credentials/store.py`(`CredentialStore` keyring→.env→env,`status` 只返 configured+masked,fail-safe)+ `backend.py`(os.open 0o600)+ `scanner.py`(自写扫描器) | `tests/credentials/test_store.py`(`test_status_masks_never_plaintext` / `test_dotenv_disabled_by_default` / `test_env_fallback`)、`test_scanner.py`(`test_detects_planted_key`)、`test_backend_perms.py` | CLI `aegiscode key set/status/clear`;`scripts/ci_secret_scan.py`(CI security stage);容器内 `/credentials/status`=`{"configured":false,"masked":null}`(AGENT_LOG line 441) | ✅ 通过 |
 | Docker 分发 | `Dockerfile`(python:3.12-slim,editable install,`CMD ["aegiscode","serve","--host","0.0.0.0","--port","8000"]`,key 绝不入镜像)+ `.dockerignore` | `tests/test_docker_build.py`(`test_dockerfile_has_no_key_and_runtime_cmd` / `test_dockerfile_copies_no_secrets` / `test_dockerignore_excludes_secrets_and_cruft`) | `docker build -t aegiscode .`(CI docker-build stage);AGENT_LOG line 439 记录 `docker build -t aegiscode:m8 .` 成功 + `docker run` clean exit 0 | ✅ 通过 |
@@ -56,4 +56,4 @@
 
 ## 总体验收
 
-本 worktree(`m8-hardening`)复跑:`make test` → **321 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个 task 全部 `✅ DONE` 且带 commit hash;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据;唯一非「已通过」项为 **WebUI 公网部署(deferred)**——本地 `aegiscode serve` 与 Docker 运行已实测通过,公网 URL 按既定决策暂不部署。
+本 worktree(`m8-hardening`)复跑:`make test` → **325 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个 task 全部 `✅ DONE` 且带 commit hash;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据;唯一非「已通过」项为 **WebUI 公网部署(deferred)**——本地 `aegiscode serve` 与 Docker 运行已实测通过,公网 URL 按既定决策暂不部署。
