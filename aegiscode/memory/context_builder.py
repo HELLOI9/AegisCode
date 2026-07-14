@@ -12,8 +12,8 @@ def build_context(system_prompt, tool_protocol, task, recent_steps,
             {"role":"user","content": f"TASK: {task}"}]
     mem_txt = "\n".join(f"- {m['key']}: {m['value']}" for m in memories)
     tail = []
-    if mem_txt: tail.append({"role":"system","content": "MEMORY:\n"+mem_txt})
-    if last_feedback: tail.append({"role":"user","content": "FEEDBACK:\n"+last_feedback})
+    if last_feedback: tail.append({"role":"user","content": "FEEDBACK:\n"+last_feedback})   # tier 4 first
+    if mem_txt: tail.append({"role":"system","content": "MEMORY:\n"+mem_txt})               # tier 5 after
     # recent steps newest-last; summarize oldest first when over budget
     detailed = [{"role":"assistant","content":
                  f"step {i}: {s.get('tool')} -> {s.get('feedback_category')}\n{s.get('detail','')}"}
