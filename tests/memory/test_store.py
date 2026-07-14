@@ -26,3 +26,14 @@ def test_topk_limit(tmp_path):
     s = _store(tmp_path)
     for i in range(12): s.write("p1","CODEBASE_FACT",f"k{i}",f"v{i}",[],"system")
     assert len(s.retrieve("p1", top_k=8)) == 8
+
+def test_retrieve_is_project_scoped(tmp_path):
+    s = _store(tmp_path)
+    s.write("p1", "PROJECT_CONVENTION", "k1", "alpha value", [], "user")
+    s.write("p2", "PROJECT_CONVENTION", "k2", "beta value", [], "user")
+    p1 = s.retrieve("p1")
+    p2 = s.retrieve("p2")
+    assert len(p1) == 1 and all("alpha" in r["value"] for r in p1)
+    assert len(p2) == 1 and all("beta" in r["value"] for r in p2)
+    # keyword search must also not cross projects:
+    assert s.retrieve("p1", query="beta") == []
