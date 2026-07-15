@@ -549,9 +549,9 @@ WebUI: workspace 字段已禁用, value="demo"
 ### 部署状态
 
 - 仓库侧实现: **完成**
-- Render 平台配置: **待人工执行**
-- 公网 URL: **待部署后回填**
-- `make deploy-check` 公网结果: **待部署后执行**
-- 人工安全验收: **待部署后执行**
-- 实现 commit: （待提交）
-- PR: （待创建）
+- Render 平台配置: **✅ 完成**
+- 公网 URL: **https://aegiscode-o20h.onrender.com**
+- `make deploy-check` 公网结果: **All checks passed** (/healthz=200, no secrets, WebUI OK)
+- 人工安全验收: **✅ 通过**（2026-07-15）
+- 实现 commit: `d4f5471` (main, squash merge of PR #11)
+- PR: [#11](https://github.com/HELLOI9/AegisCode/pull/11)（已合并）

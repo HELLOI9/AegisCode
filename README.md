@@ -159,7 +159,9 @@ aegiscode serve --host 127.0.0.1 --port 8000
 
 ## 12. 公网部署 URL
 
-**Deployment status: pending Render provisioning**
+**https://aegiscode-o20h.onrender.com**
+
+> 免费实例 15 分钟无请求后休眠，首次访问需等待 ~30s 冷启动。
 
 ### 部署架构
 

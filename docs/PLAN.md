@@ -2877,12 +2877,12 @@ git commit -m "ci: unit-test job + secret scan + docker build"
   - `make demo` → 3 passed, 0 failed (exit 0)
   - `docker build -t aegiscode:render .` → 成功
   - Docker 容器 Demo Mode 验证：/healthz=200, demo workspace 创建成功, 任意路径拒绝, /ui-config 正确
-- **部署状态**：仓库侧实现完成；Render 平台配置待人工执行
-- **实现 commit**：（待提交）
-- **PR**：（待创建）
-- **公网 URL**：（待 Render 配置后回填）
-- **`make deploy-check` 公网结果**：（待部署后执行）
-- **人工验收**：（待部署后执行）
+- **部署状态**：✅ 已完成
+- **实现 commit**：`1cc96cf`（squash merged via PR #11）→ main `d4f5471`
+- **PR**：[#11](https://github.com/HELLOI9/AegisCode/pull/11)（已合并）
+- **公网 URL**：https://aegiscode-o20h.onrender.com
+- **`make deploy-check` 公网结果**：All checks passed（/healthz=200, no secrets, WebUI OK）
+- **人工验收**：✅ 通过（2026-07-15）
 
 ---
 
