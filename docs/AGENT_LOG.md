@@ -463,4 +463,5 @@
 - **凭据安全检查**:workflow 未写入/硬编码任何 API Key / token / `.env` / registry 密码;`make test`/`make demo` 全程 MockLLM、零网络、无 Secret;`git diff` 未引入真实凭据(徽章/ACCEPTANCE 仅含公开 repo 地址 `HELLOI9/AegisCode`)。
 - **actionlint/yamllint**:环境**未安装**,不擅自全局安装不受控软件;以 Python `yaml.safe_load` + `tests/test_ci_config.py` 静态校验替代,**GitHub 远端运行为最终验证**。
 - **人工审阅与修改**:保留现有三 job 与测试逻辑,仅补硬化项;docker tag 由 `aegiscode` 改为 `aegiscode:ci`(与本任务 §七 一致,不影响语义)。
-- **GitHub 远端运行是否完成**:**否——⏳ 等待远端验证**。本地仅证明「YAML 已检查 / 项目命令本地通过 / Docker 本地构建通过」;尚未推送,未获真实 Actions 成功运行。推送并跑通后补运行链接、commit hash、结果至本记录与 ACCEPTANCE。
+- **GitHub 远端运行**:**✅ 已完成并成功**。推送分支 `chore/github-actions` → PR [#10](https://github.com/HELLOI9/AegisCode/pull/10) → Actions [run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746)(event=pull_request,commit `bd98d9c`)三 job 全绿:unit-test(23s)/secret-scan(19s)/docker-build(20s),conclusion=**success**。
+- **远端观察与后续修正**:①push 事件未在 feature 分支双触发(触发设计 `push[main]` 生效),仅 PR 触发一次;②gitleaks 兜底步骤报 `GITHUB_TOKEN is now required to scan pull requests`——因 `continue-on-error: true` **未使 job 失败**(自写 `ci_secret_scan.py` 为权威闸,已通过),但兜底实为 no-op 并在绿色运行上留红 X 注解。修正:向该 step 注入自动提供的只读 `GITHUB_TOKEN`(`env.GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`),使兜底真正生效,**不扩大权限**(仍 `contents: read`,不发评论),符合 §四。③Node20 弃用为 GitHub runner 侧信息注解,与本项目无关。

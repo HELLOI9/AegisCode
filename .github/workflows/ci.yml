@@ -58,10 +58,14 @@ jobs:
         run: pip install -e .
       - name: Authoritative secret-scan gate (self-written, allowlisted)
         run: python scripts/ci_secret_scan.py
-      # Secondary backstop; never masks the primary gate above.
+      # Secondary backstop; never masks the primary gate above. gitleaks needs
+      # the auto-provided read-only token to fetch PR commits — this stays within
+      # the declared `contents: read` (no comments posted, no scope expansion).
       - name: gitleaks (backstop)
         uses: gitleaks/gitleaks-action@v2
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   docker-build:
     runs-on: ubuntu-latest

@@ -2848,8 +2848,8 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 
 - **补充原因**:Task 32 已交付 `.gitlab-ci.yml`(签字 PLAN 主 CI)+ `.github/workflows/ci.yml` 镜像(commit 3698399/8a02d9f),使 CI 在 GitHub-hosted repo 真跑。但该镜像缺 acceptance-spec 后续要求的硬化项:手动触发(`workflow_dispatch`)、最小权限(`permissions: contents: read`)、并发控制(按 ref 分组)、依赖缓存(setup-python pip 缓存)、step 命名。本任务在**不改测试真相来源**(仍复用 `make test`/`make demo`,不复制测试逻辑)前提下补齐。
 - **实现范围**:仅修改 `.github/workflows/ci.yml`(单文件硬化,未新建重复 workflow;`.gitlab-ci.yml` 未动,`unit-test` job 保留);文档更新 README §16(持续集成)、`docs/ACCEPTANCE.md`(GitHub Actions 行)、`docs/AGENT_LOG.md`(CI 补充记录)。
-- **验证结果**:本地 `make test` → 325 passed;`make demo` → 3 passed/0 failed(exit 0);`tests/test_ci_config.py` → 8 passed;`docker build -t aegiscode:ci .` → 成功;两 CI YAML 解析通过。**GitHub 远端运行:⏳ 待推送后验证**(本地通过 ≠ Actions 通过)。
-- **实现 commit**:_待提交后补 hash_。
+- **验证结果**:本地 `make test` → 325 passed;`make demo` → 3 passed/0 failed(exit 0);`tests/test_ci_config.py` → 8 passed;`docker build -t aegiscode:ci .` → 成功;两 CI YAML 解析通过。**GitHub 远端运行:✅ 成功**([run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746),三 job 全绿)。
+- **实现 commit**:`bd98d9c`(硬化)+ gitleaks token 修正(见 PR [#10](https://github.com/HELLOI9/AegisCode/pull/10));详见 AGENT_LOG CI 补充记录。
 
 ---
 
