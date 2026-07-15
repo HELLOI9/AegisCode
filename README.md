@@ -1,5 +1,7 @@
 # AegisCode
 
+[![CI](https://github.com/HELLOI9/AegisCode/actions/workflows/ci.yml/badge.svg)](https://github.com/HELLOI9/AegisCode/actions/workflows/ci.yml)
+
 > 治理优先的编码智能体 harness —— 自实现主循环 + 确定性反馈闭环。
 > A policy-governed coding-agent harness with deterministic feedback loops.
 
@@ -202,7 +204,28 @@ Dockerfile .dockerignore Makefile pyproject.toml
 - 密钥扫描器有意限于 `sk-`/`AKIA`/`KEY=` 等已知格式,非通用密钥探测器。
 - 真实 provider 的单次网络调用有 60s 超时;循环有 wall-clock 超时上限。
 
-## 16. 第三方依赖和许可证
+## 16. 持续集成(CI)
+
+本项目有两套 CI,共用**同一测试真相来源**(`Makefile` 的 `make test` / `make demo` + `docker build`),不重复实现测试逻辑:
+
+- **GitLab CI(`.gitlab-ci.yml`)**:课程要求的**主要** CI 配置,签字 PLAN 指定其形态(stages `test`/`security`/`build`,`unit-test` job)。
+- **GitHub Actions(`.github/workflows/ci.yml`)**:面向公开 GitHub 仓库的**补充** CI。因本仓库托管于 GitHub,GitLab pipeline 不会自动执行,这套 workflow 才是 GitHub 上真正跑起来的那套。
+
+两者都执行相同的核心自动化验证:
+
+| Job | 命令 | 作用 |
+|-----|------|------|
+| `unit-test` | `make test` + `make demo` | 全套测试 + 三项确定性机制演示(危险动作拦截 / 失败反馈驱动动作变化 / 审批绑定失效) |
+| `secret-scan` | `python scripts/ci_secret_scan.py`(+ gitleaks 兜底) | 自写确定性密钥闸(权威判定)+ gitleaks 兜底(不掩盖主判定) |
+| `docker-build` | `docker build -t aegiscode:ci .` | 仅验证镜像可构建,不推送、不需 registry 凭据 |
+
+关键安全属性:`make test` 与 `make demo` **全程 MockLLM 驱动,零网络、不需真实 LLM、不需 API Key、不需任何 Secret**。GitHub Actions 采用最小权限(`permissions: contents: read`),并按分支/PR 分组做并发控制(新推送取消同一 ref 的旧运行)。触发条件:推送到 `main`、针对任意分支的 Pull Request、以及手动 `workflow_dispatch`。
+
+Python 版本在 `pyproject.toml`(`>=3.12`)、Dockerfile(`python:3.12-slim`)、GitLab CI 与 GitHub Actions 之间保持一致(均 3.12)。
+
+> 顶部徽章反映 GitHub Actions 在默认分支 `main` 上的最新运行状态。
+
+## 17. 第三方依赖和许可证
 
 本项目代码尚未附带独立 LICENSE 文件(课程作业)。运行期第三方依赖及其许可证:
 

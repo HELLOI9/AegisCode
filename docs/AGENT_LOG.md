@@ -446,3 +446,21 @@
 - **1 Important(已修 11f0995)**:`run_command` 路径围栏**误拒**参数中仅"包含"敏感词的合法命令——`git commit -m added-credentials-helper`、`git checkout credentials-fix`、`git branch feature/credentials` 全被 `CMD_PATH_FENCE` 硬拒,把 `git commit` 从应有的 REQUIRE_APPROVAL 静默降级。fail-closed(过度拦截非漏洞),但破坏 agent 常用的受治理路径(commit message/branch 名由模型生成、含 "credentials" 很常见)。
 - **控制器独立复现 + TDD 修复**:分离 fence 混淆的两种威胁——**逃逸**(路径解析到 workspace 外,对**任何**命令都是威胁→恒拒,`git apply /etc/passwd`/`python ../x`/`rm -rf /` 仍拒);**敏感名**(workspace 内、basename 命中 `.env`/`*.pem` 等,仅当命令**把它当文件消费**——python/pytest/ruff/mypy——才是读/执行威胁;git/pip 的裸敏感词 token 是 ref/message/package 非文件访问,不 fence,交策略引擎判定,`python .env`/`key.pem` 仍拒)。另停止 fence argv0(allowlist own 它)。4 条非回归测试,全量 321→325,make demo 3 passed。
 - **Minor(评审记录,未阻塞)**:demo1 docstring 陈旧(`rm -rf /` 现经 `CMD_PATH_FENCE` 拒非 allowlist,已顺手修);两套 demo 入口共存(`make demo` 评分集 / `aegiscode demo` SPEC 集,README §10 已注明,可合并后整合);`ci_secret_scan` 行钉 43→44 已核对无误。
+
+#### CI 补充:GitHub Actions 硬化(2026-07-15 14:43 CST,分支 `chore/github-actions`)
+- **任务**:补充/硬化 GitHub Actions CI(交付增强,非原始 PLAN 遗漏——见 PLAN §「收尾追加任务」)。
+- **修改原因**:`.github/workflows/ci.yml` 此前已存在(commit 3698399/8a02d9f,`on: [push, pull_request]`,三 job),但缺 §三 手动触发、§四 最小权限、§五 并发控制、§八 缓存、§九 step 命名。本次在**不改测试真相来源**(仍复用 `make test`/`make demo`,不复制测试逻辑)的前提下补齐。
+- **参考的现有 GitLab CI**:`.gitlab-ci.yml`(stages test/security/build;`unit-test`→`make test`+`make demo`;`secret-scan`→`ci_secret_scan.py`+gitleaks 兜底;`docker-build`→`docker build`)。GitHub Actions 保持同构,job 名 `unit-test` 精确保留(决策 #23)。
+- **新增/修改 workflow 文件**:`.github/workflows/ci.yml`(单文件硬化,未新建重复 workflow)。
+- **触发条件**:`push: branches:[main]` + `pull_request:`(任意分支的 PR) + `workflow_dispatch:`(手动)。选此以精确覆盖「推 main / 对 main 的 PR / 手动」,feature 分支经其 PR 触发避免 push+PR 同 commit 双跑;不引入路径过滤(遵 §三简单可靠)。
+- **权限配置**:顶层 `permissions: contents: read`(最小权限);未申请任何写权限,GITHUB_TOKEN 保持只读。
+- **并发**:`concurrency.group=${{ github.workflow }}-${{ github.ref }}`,`cancel-in-progress: true`(同 ref 新推送取消旧运行;不同分支互不影响)。
+- **Job 结构**:①`unit-test`(setup-python 3.12 + pip 缓存 → `pip install -e ".[dev]"` → `make test` → `make demo`;test/demo 同 job——环境相同且 demo 秒级,拆分只重复装依赖无收益,遵 §七);②`secret-scan`(`ci_secret_scan.py` 权威闸 + gitleaks-action@v2 `continue-on-error` 兜底);③`docker-build`(`docker build -t aegiscode:ci .`,仅构建不推送)。
+- **运行时版本**:Python 3.12——与 pyproject(`>=3.12`)/Dockerfile(`python:3.12-slim`)/GitLab CI 一致。
+- **统一命令**:`make test`、`make demo`、`docker build`(测试真相来源=Makefile,两 CI 共用)。
+- **本地验证结果**:`make test` → **325 passed**(1 warning,starlette/httpx 弃用,非本项目);`make demo` → **3 passed / 0 failed(exit 0)**;`tests/test_ci_config.py` → **8 passed**;两 CI YAML 均 `yaml.safe_load` 解析通过,GH 三 job/权限/并发/触发核对无误,GitLab `unit-test` 仍在且跑 `make test`。
+- **Docker 构建结果**:`docker build -t aegiscode:ci .` → **成功**(镜像 `aegiscode:ci`)。
+- **凭据安全检查**:workflow 未写入/硬编码任何 API Key / token / `.env` / registry 密码;`make test`/`make demo` 全程 MockLLM、零网络、无 Secret;`git diff` 未引入真实凭据(徽章/ACCEPTANCE 仅含公开 repo 地址 `HELLOI9/AegisCode`)。
+- **actionlint/yamllint**:环境**未安装**,不擅自全局安装不受控软件;以 Python `yaml.safe_load` + `tests/test_ci_config.py` 静态校验替代,**GitHub 远端运行为最终验证**。
+- **人工审阅与修改**:保留现有三 job 与测试逻辑,仅补硬化项;docker tag 由 `aegiscode` 改为 `aegiscode:ci`(与本任务 §七 一致,不影响语义)。
+- **GitHub 远端运行是否完成**:**否——⏳ 等待远端验证**。本地仅证明「YAML 已检查 / 项目命令本地通过 / Docker 本地构建通过」;尚未推送,未获真实 Actions 成功运行。推送并跑通后补运行链接、commit hash、结果至本记录与 ACCEPTANCE。
