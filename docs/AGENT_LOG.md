@@ -465,3 +465,93 @@
 - **人工审阅与修改**:保留现有三 job 与测试逻辑,仅补硬化项;docker tag 由 `aegiscode` 改为 `aegiscode:ci`(与本任务 §七 一致,不影响语义)。
 - **GitHub 远端运行**:**✅ 已完成并成功**。推送分支 `chore/github-actions` → PR [#10](https://github.com/HELLOI9/AegisCode/pull/10) → Actions [run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746)(event=pull_request,commit `bd98d9c`)三 job 全绿:unit-test(23s)/secret-scan(19s)/docker-build(20s),conclusion=**success**。
 - **远端观察与后续修正**:①push 事件未在 feature 分支双触发(触发设计 `push[main]` 生效),仅 PR 触发一次;②gitleaks 兜底步骤报 `GITHUB_TOKEN is now required to scan pull requests`——因 `continue-on-error: true` **未使 job 失败**(自写 `ci_secret_scan.py` 为权威闸,已通过),但兜底实为 no-op 并在绿色运行上留红 X 注解。修正:向该 step 注入自动提供的只读 `GITHUB_TOKEN`(`env.GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`),使兜底真正生效,**不扩大权限**(仍 `contents: read`,不发评论),符合 §四。③Node20 弃用为 GitHub runner 侧信息注解,与本项目无关。
+
+---
+
+## 追加任务 B：Render 公网部署
+
+- **时间戳**:2026-07-15
+- **对应 PLAN task**：追加任务 B（SPEC §13.4 + M14 公网 demo URL）
+- **此前暂缓原因**：核心 Harness、治理机制、CI pipeline 优先验收；公网部署依赖全部机制就位
+- **恢复执行时间**：2026-07-15
+- **Superpowers Skill**：using-git-worktrees + executing-plans
+- **分支**：`deploy/render-web-service`
+- **worktree**：`.claude/worktrees/deploy-render`
+
+### TDD 记录
+
+1. `/healthz` 端点:
+   - Red: `tests/service/test_healthz.py` — 3 tests FAIL (endpoint 不存在, 404)
+   - Green: `aegiscode/service/api.py` 新增 `/healthz` → 3 tests PASS
+2. Demo Mode 安全限制:
+   - Red: `tests/service/test_demo_mode.py` — 验证拒绝逻辑
+   - Green: `aegiscode/service/demo_mode.py` + API 集成 → 7 tests PASS
+3. deploy-check 脚本:
+   - Red: `tests/test_deploy_check.py` — 验证 healthz/secrets/webui 检查
+   - Green: `scripts/deploy_check.py` → 9 tests PASS
+
+### 修改文件
+
+- 新增: `render.yaml`, `aegiscode/service/demo_mode.py`, `examples/demo-project/{main.py,test_main.py}`, `scripts/deploy_check.py`, `tests/service/test_healthz.py`, `tests/service/test_demo_mode.py`, `tests/test_deploy_check.py`
+- 修改: `aegiscode/service/api.py` (+/healthz, +/ui-config, +demo mode 集成), `aegiscode/cli.py` (PORT env), `aegiscode/config/loader.py` (workspace env override), `aegiscode/service/webui/app.js` (demo mode UI), `Dockerfile` (PORT, examples/), `Makefile` (+deploy-check), `pyproject.toml` (testpaths)
+- 文档: `docs/PLAN.md`, `docs/ACCEPTANCE.md`, `docs/AGENT_LOG.md`, `README.md`
+
+### Render 设计
+
+- Web Service, runtime=docker, plan=free, region=oregon
+- 健康检查: `/healthz`
+- auto-deploy: `checksPass` (GitHub CI 通过后)
+- 环境变量: `AEGIS_LLM_PROVIDER=mock`, `AEGIS_DEMO_MODE=1`, `AEGIS_HOME=/tmp/aegiscode`, `AEGIS_WORKSPACE_ROOT=/tmp`, `AEGIS_WORKSPACE_ALLOWED_BASE=/tmp`
+- 无 Secret 写入 render.yaml
+
+### 本地 Docker 验证
+
+```
+docker build -t aegiscode:render . → 成功
+docker run --rm -p 8088:8088 -e PORT=8088 -e AEGIS_LLM_PROVIDER=mock \
+  -e AEGIS_DEMO_MODE=1 -e AEGIS_HOME=/tmp/aegiscode \
+  -e AEGIS_WORKSPACE_ROOT=/tmp -e AEGIS_WORKSPACE_ALLOWED_BASE=/tmp \
+  aegiscode:render
+curl http://localhost:8088/healthz → {"status":"ok","service":"aegiscode","mode":"demo"}
+curl -X POST /tasks workspace="/etc" → 400 (demo mode 拒绝)
+curl -X POST /tasks workspace="demo" → 200 (创建 task, 临时工作区)
+curl /ui-config → {"demo_mode":true}
+WebUI: workspace 字段已禁用, value="demo"
+```
+
+### Demo Mode 安全验证
+
+- 容器不需要 API Key ✅
+- WebUI workspace 字段 disabled ✅
+- 后端拒绝任意路径 ✅
+- 后端接受 "demo" 并创建临时工作区 ✅
+- /healthz 不泄漏敏感信息 ✅
+- 治理引擎保持开启 ✅
+
+### 测试结果
+
+- `make test` → **344 passed**, 1 warning
+- `make demo` → **3 passed, 0 failed** (exit 0)
+- `docker build -t aegiscode:render .` → 成功
+
+### 人工 Render 操作（待用户执行）
+
+1. 登录 Render Dashboard
+2. 连接 GitHub 仓库 `HELLOI9/AegisCode`
+3. 选择 Blueprint (`render.yaml`)
+4. 确认 Docker、free plan、oregon region
+5. 确认环境变量（非敏感，已在 render.yaml）
+6. 确认 `/healthz` 健康检查
+7. 启用 CI Checks pass before deploy
+8. 首次部署 → 获取公网 URL
+9. 验证 /healthz + WebUI + Demo
+
+### 部署状态
+
+- 仓库侧实现: **完成**
+- Render 平台配置: **待人工执行**
+- 公网 URL: **待部署后回填**
+- `make deploy-check` 公网结果: **待部署后执行**
+- 人工安全验收: **待部署后执行**
+- 实现 commit: （待提交）
+- PR: （待创建）

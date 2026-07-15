@@ -11,6 +11,7 @@ plaintext credential value is never included in any API response.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +21,12 @@ from pydantic import BaseModel
 
 from aegiscode.credentials.store import CredentialStore
 from aegiscode.service.app_service import ApplicationService, WorkspaceNotAllowedError
+from aegiscode.service.demo_mode import (
+    cleanup_demo_workspace,
+    create_demo_workspace,
+    is_demo_mode,
+    validate_demo_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +113,31 @@ def build_app(
 
         A workspace outside the server-side allowed base is rejected with 400
         and NO task is created (defense-in-depth over the localhost-only posture).
+
+        In demo mode, only workspace="demo" is accepted; the server creates an
+        ephemeral copy of the bundled demo project.
         """
+        workspace = body.workspace
+        demo_tmp = None
+
+        # Demo mode enforcement (server-side, independent of frontend)
+        try:
+            validate_demo_request(workspace)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        if is_demo_mode() and workspace == "demo":
+            demo_tmp = create_demo_workspace()
+            workspace = demo_tmp
+
         try:
             task_id = service.create_task(
-                workspace=body.workspace,
+                workspace=workspace,
                 description=body.description,
             )
         except WorkspaceNotAllowedError as exc:
+            if demo_tmp:
+                cleanup_demo_workspace(demo_tmp)
             raise HTTPException(status_code=400, detail=str(exc))
         return {"task_id": task_id}
 
@@ -211,6 +236,17 @@ def build_app(
     def webui_index() -> FileResponse:
         """Serve the WebUI HTML shell."""
         return FileResponse(_webui_dir / "index.html", media_type="text/html")
+
+    @app.get("/healthz")
+    def healthz() -> dict:
+        """Lightweight health check — no LLM, no network, no secrets."""
+        mode = "demo" if os.environ.get("AEGIS_DEMO_MODE") == "1" else "standard"
+        return {"status": "ok", "service": "aegiscode", "mode": mode}
+
+    @app.get("/ui-config")
+    def ui_config() -> dict:
+        """Frontend configuration — tells the UI about deployment mode."""
+        return {"demo_mode": is_demo_mode()}
 
     @app.get("/app.js")
     def webui_app_js() -> FileResponse:

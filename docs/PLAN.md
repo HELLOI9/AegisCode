@@ -2851,6 +2851,39 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 - **验证结果**:本地 `make test` → 325 passed;`make demo` → 3 passed/0 failed(exit 0);`tests/test_ci_config.py` → 8 passed;`docker build -t aegiscode:ci .` → 成功;两 CI YAML 解析通过。**GitHub 远端运行:✅ 成功**([run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746),三 job 全绿)。
 - **实现 commit**:`bd98d9c`(硬化)+ gitleaks token 修正(见 PR [#10](https://github.com/HELLOI9/AegisCode/pull/10));详见 AGENT_LOG CI 补充记录。
 
+### 追加任务 B：Render 公网部署（分支 `deploy/render-web-service`）
+
+- **补充原因**：SPEC §13.4 + M14 要求"公网 demo URL"（§清单第 9 条硬性）。原 32-task 计划中 Task 30 仅覆盖 Dockerfile 构建，公网部署从未拆分为独立 task。此前以"核心 Harness 与 CI 优先完成、平台部署暂缓"为由 deferred，ACCEPTANCE 和 README 均标注"公网 URL 待部署"。现恢复执行。
+- **此前暂缓原因**：核心 Harness、治理机制、CI pipeline 优先验收完成；公网部署依赖所有机制就位后再上线。
+- **恢复执行日期**：2026-07-15
+- **实现范围**：
+  - 新增 `render.yaml`（Render Blueprint, Docker, free plan, /healthz, checksPass）
+  - 新增 `/healthz` 端点（`aegiscode/service/api.py`）
+  - 新增 Demo Mode 模块（`aegiscode/service/demo_mode.py`）
+  - 新增 `examples/demo-project/`（受控示例工作区模板）
+  - 新增 `scripts/deploy_check.py` + `make deploy-check` 命令
+  - 修改 `aegiscode/cli.py`（PORT 环境变量适配）
+  - 修改 `aegiscode/config/loader.py`（AEGIS_WORKSPACE_ROOT/ALLOWED_BASE env override）
+  - 修改 `Dockerfile`（$PORT、examples/）
+  - 修改 `pyproject.toml`（testpaths 排除 examples/）
+  - 修改 `aegiscode/service/webui/app.js`（Demo Mode 下隐藏 workspace 输入）
+  - 新增测试：`tests/service/test_healthz.py`、`tests/service/test_demo_mode.py`、`tests/test_deploy_check.py`
+- **TDD**：
+  - Red: /healthz 测试 3 FAIL → Green: 实现端点 → 3 PASS
+  - Red: demo mode 单元测试 → Green: demo_mode.py + API 集成
+  - Red: deploy-check 测试 → Green: 脚本逻辑
+- **验证结果**：
+  - `make test` → 344 passed
+  - `make demo` → 3 passed, 0 failed (exit 0)
+  - `docker build -t aegiscode:render .` → 成功
+  - Docker 容器 Demo Mode 验证：/healthz=200, demo workspace 创建成功, 任意路径拒绝, /ui-config 正确
+- **部署状态**：仓库侧实现完成；Render 平台配置待人工执行
+- **实现 commit**：（待提交）
+- **PR**：（待创建）
+- **公网 URL**：（待 Render 配置后回填）
+- **`make deploy-check` 公网结果**：（待部署后执行）
+- **人工验收**：（待部署后执行）
+
 ---
 
 ## Task Dependency Summary

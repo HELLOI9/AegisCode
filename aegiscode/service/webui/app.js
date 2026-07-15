@@ -238,4 +238,19 @@
   verifyBtn.addEventListener("click", verifyChain);
 
   loadCredentialStatus();
+
+  // --- demo mode UI adaptation -------------------------------------------
+  (async function loadUiConfig() {
+    try {
+      const cfg = await getJSON("/ui-config");
+      if (cfg.demo_mode) {
+        const wsInput = $("workspace");
+        wsInput.value = "demo";
+        wsInput.disabled = true;
+        wsInput.title = "Demo mode: workspace is fixed to the built-in sample project";
+        // Remove the required constraint on a disabled field
+        wsInput.removeAttribute("required");
+      }
+    } catch (e) { /* non-critical */ }
+  })();
 })();

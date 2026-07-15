@@ -159,7 +159,55 @@ aegiscode serve --host 127.0.0.1 --port 8000
 
 ## 12. 公网部署 URL
 
-**当前未做公网部署**(本轮交付聚焦本地 + Docker 运行与验收)。面板默认**无鉴权、仅限本机**,不适合裸暴露公网。若需公网演示,建议:容器化 + 默认 `AEGIS_LLM_PROVIDER=mock` + 固定/临时工作区 + 端口只绑 loopback 并置于带鉴权的反向代理之后 + **治理机制保持开启**(不得为演示关闭护栏)。届时公网 URL 将回填于此。
+**Deployment status: pending Render provisioning**
+
+### 部署架构
+
+```
+GitHub main → GitHub Actions CI (make test + make demo + docker build)
+  → CI Checks Pass → Render GitHub Integration auto-deploy
+  → FastAPI + WebUI (Demo Mode, MockLLM)
+```
+
+### Render 配置
+
+- **平台**: Render Web Service (Docker, free plan)
+- **Blueprint**: `render.yaml`
+- **健康检查**: `GET /healthz` → `{"status":"ok","service":"aegiscode","mode":"demo"}`
+- **CI/CD**: GitHub Actions pass → Render auto-deploy (`autoDeployTrigger: checksPass`)
+
+### Demo Mode（公网安全形态）
+
+公网实例以 `AEGIS_DEMO_MODE=1` 运行，提供受限演示沙箱：
+
+- **LLM**: MockLLM（零成本零风险，无需 API Key）
+- **工作区**: 仅接受 `"demo"` sentinel，每次任务创建临时副本，任务结束后清理
+- **安全限制**: 拒绝任意服务器路径、禁止网络工具、禁止依赖安装、禁止 Git 写操作
+- **治理**: 所有治理引擎（路径围栏、命令词法、审批状态机）保持开启
+- **持久化**: 临时——Render 免费实例重启/休眠后数据丢失，可重建 Demo 数据
+- **冷启动**: 免费实例 15 分钟无请求后休眠，首次访问需等待 ~30s 冷启动
+
+### 部署验证
+
+```bash
+make deploy-check DEPLOY_URL=https://<your-render-url>
+```
+
+### 本地 Docker 运行（Demo Mode）
+
+```bash
+docker build -t aegiscode:render .
+docker run --rm -p 8000:8000 \
+  -e PORT=8000 \
+  -e AEGIS_LLM_PROVIDER=mock \
+  -e AEGIS_DEMO_MODE=1 \
+  -e AEGIS_HOME=/tmp/aegiscode \
+  -e AEGIS_WORKSPACE_ROOT=/tmp \
+  -e AEGIS_WORKSPACE_ALLOWED_BASE=/tmp \
+  aegiscode:render
+# 浏览器打开 http://localhost:8000
+# curl http://localhost:8000/healthz
+```
 
 ## 13. 目录结构
 
