@@ -32,6 +32,7 @@ from types import SimpleNamespace
 
 from aegiscode.audit.chain import AuditLog
 from aegiscode.config.schema import AegisConfig, Feedback, Limits, Workspace
+from aegiscode.demo.scenarios import get_scenario
 from aegiscode.governance.factory import build_dispatcher
 from aegiscode.llm.mock import MockLLM
 from aegiscode.loop.harness import HarnessCore
@@ -43,6 +44,10 @@ from aegiscode.tools.run_tests_tool import RunTestsTool
 from aegiscode.tools.file_tools import WriteFileTool
 
 # Wrong and correct implementations the agent writes in round 1 and round 3.
+# Kept as constants for fixture-scaffolding + on-disk asserts below; the
+# MockLLM script itself is sourced from the shared scenario registry
+# (single source of truth shared with the WebUI consumer), and the assertion
+# right after _SCRIPT proves these constants can't silently diverge from it.
 _WRONG_IMPL = "def add(a, b):\n    return a - b\n"
 _RIGHT_IMPL = "def add(a, b):\n    return a + b\n"
 
@@ -62,6 +67,20 @@ _CHECK_PY = (
     "assert got == 3, f'add(1,2)={got} expected 3'\n"
     "print('ok')\n"
 )
+
+# The MockLLM script fed into the harness — sourced from the shared scenario
+# registry so the CLI and Web demos can never silently diverge. Asserted
+# against the _WRONG_IMPL/_RIGHT_IMPL constants above so those constants
+# (kept for fixture-scaffolding + the on-disk proof) cannot drift from what
+# the registry actually encodes.
+_SCRIPT = list(get_scenario("feedback-driven-repair").mock_script)
+assert _SCRIPT == [
+    json.dumps({"tool": "write_file", "arguments": {"path": "src/calc.py", "content": _WRONG_IMPL}}),
+    json.dumps({"tool": "run_tests", "arguments": {}}),
+    json.dumps({"tool": "write_file", "arguments": {"path": "src/calc.py", "content": _RIGHT_IMPL}}),
+    json.dumps({"tool": "run_tests", "arguments": {}}),
+    json.dumps({"tool": "finish", "arguments": {}}),
+], "scenario registry mock_script diverged from demo2's wrong/right impl constants"
 
 
 class _RecordingLLM:
@@ -153,21 +172,9 @@ def run() -> dict:
             )
             return p.returncode == 0
 
-        # Scripted golden path: write-wrong, test(fail), write-right, test(pass), finish.
-        round1 = json.dumps(
-            {"tool": "write_file", "arguments": {"path": "src/calc.py", "content": _WRONG_IMPL}}
-        )
-        round3 = json.dumps(
-            {"tool": "write_file", "arguments": {"path": "src/calc.py", "content": _RIGHT_IMPL}}
-        )
-        scripted = [
-            round1,
-            json.dumps({"tool": "run_tests", "arguments": {}}),
-            round3,
-            json.dumps({"tool": "run_tests", "arguments": {}}),
-            json.dumps({"tool": "finish", "arguments": {}}),
-        ]
-        rec = _RecordingLLM(MockLLM(scripted))
+        # Scripted golden path: write-wrong, test(fail), write-right, test(pass),
+        # finish — sourced from the shared scenario registry via _SCRIPT.
+        rec = _RecordingLLM(MockLLM(_SCRIPT))
 
         harness = HarnessCore(
             llm=rec,

@@ -34,6 +34,7 @@ from types import SimpleNamespace
 from aegiscode.audit.chain import AuditLog
 from aegiscode.audit.events import EventType
 from aegiscode.config.schema import AegisConfig, Limits, Workspace
+from aegiscode.demo.scenarios import get_scenario
 from aegiscode.governance.factory import build_dispatcher
 from aegiscode.llm.mock import MockLLM
 from aegiscode.loop.harness import HarnessCore
@@ -43,6 +44,11 @@ from aegiscode.tools.registry import ToolRegistry
 from aegiscode.tools.result import ToolResult
 
 _TASK_ID = "demo1"
+
+# The MockLLM script fed into the harness — sourced from the shared scenario
+# registry (single source of truth shared with the WebUI consumer) so the CLI
+# and Web demos can never silently diverge.
+_SCRIPT = list(get_scenario("dangerous-action-denial").mock_script)
 
 
 class _SpyCommandTool:
@@ -100,9 +106,7 @@ def run() -> dict:
             write_max_bytes=config.tools.write_max_bytes,
         )
 
-        llm = MockLLM(
-            [json.dumps({"tool": "run_command", "arguments": {"command": "rm -rf /"}})]
-        )
+        llm = MockLLM(_SCRIPT)
 
         harness = HarnessCore(
             llm=llm,

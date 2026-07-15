@@ -46,6 +46,7 @@ from types import SimpleNamespace
 from aegiscode.audit.chain import AuditLog
 from aegiscode.audit.events import EventType
 from aegiscode.config.schema import AegisConfig, Limits, Workspace
+from aegiscode.demo.scenarios import get_scenario
 from aegiscode.governance.approval import ApprovalStore, fingerprint
 from aegiscode.governance.factory import build_dispatcher
 from aegiscode.llm.mock import MockLLM
@@ -63,6 +64,20 @@ _SUPERSEDED_PATH = "docs/superseded.txt"
 _APPROVED_CONTENT = "approved-write\n"
 _SUPERSEDED_CONTENT = "original-content-the-human-would-have-seen\n"
 _MUTATED_CONTENT = "MUTATED-after-approval\n"
+
+# The MockLLM script fed into the harness — sourced from the shared scenario
+# registry (single source of truth shared with the WebUI consumer) so the CLI
+# and Web demos can never silently diverge. The path/content constants above
+# are also referenced by the on-disk asserts below; they must stay consistent
+# with what the registry's script actually encodes (asserted just below).
+_SCRIPT = list(get_scenario("approval-binding-invalidation").mock_script)
+assert _SCRIPT == [
+    json.dumps({"tool": "write_file",
+                "arguments": {"path": _APPROVED_PATH, "content": _APPROVED_CONTENT}}),
+    json.dumps({"tool": "write_file",
+                "arguments": {"path": _SUPERSEDED_PATH, "content": _SUPERSEDED_CONTENT}}),
+    json.dumps({"tool": "finish", "arguments": {}}),
+], "scenario registry mock_script diverged from demo3's path/content constants"
 
 class _SpyWriteFileTool:
     """Wraps the REAL WriteFileTool, recording every execution.
@@ -191,13 +206,7 @@ def run() -> dict:
         # write, then finish. The second write proposes ORIGINAL content — the
         # resolver mutates it after the fingerprint is bound, so supersession is
         # caused by the resolver seam, not by the LLM emitting different text.
-        llm = MockLLM([
-            json.dumps({"tool": "write_file",
-                        "arguments": {"path": _APPROVED_PATH, "content": _APPROVED_CONTENT}}),
-            json.dumps({"tool": "write_file",
-                        "arguments": {"path": _SUPERSEDED_PATH, "content": _SUPERSEDED_CONTENT}}),
-            json.dumps({"tool": "finish", "arguments": {}}),
-        ])
+        llm = MockLLM(_SCRIPT)
 
         harness = HarnessCore(
             llm=llm,
