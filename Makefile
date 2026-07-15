@@ -8,7 +8,7 @@
 # failure), so CI can gate on it directly.
 PY ?= python
 
-.PHONY: test demo demo-guardrail demo-feedback demo-approval
+.PHONY: test demo demo-guardrail demo-feedback demo-approval deploy-check
 
 test:
 	pytest -q
@@ -25,3 +25,9 @@ demo-feedback:
 
 demo-approval:
 	$(PY) -m demos.run_demos --only approval
+
+deploy-check:
+ifndef DEPLOY_URL
+	$(error DEPLOY_URL is required. Usage: make deploy-check DEPLOY_URL=https://...)
+endif
+	$(PY) scripts/deploy_check.py $(DEPLOY_URL)

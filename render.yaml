@@ -1,0 +1,29 @@
+# AegisCode Render Blueprint — public demo deployment.
+#
+# This deploys a restricted, MockLLM-only demo instance. No real API keys
+# are required. The service uses AEGIS_DEMO_MODE=1 to lock down workspace
+# access and enforce sandbox limits.
+#
+# Secrets (if any future need arises) must be configured via Render Dashboard
+# Secret Environment Variables — NEVER hardcode them here.
+
+services:
+  - type: web
+    name: aegiscode
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: AEGIS_LLM_PROVIDER
+        value: mock
+      - key: AEGIS_DEMO_MODE
+        value: "1"
+      - key: AEGIS_HOME
+        value: /tmp/aegiscode
+      - key: AEGIS_WORKSPACE_ROOT
+        value: /tmp
+      - key: AEGIS_WORKSPACE_ALLOWED_BASE
+        value: /tmp

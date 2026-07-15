@@ -11,6 +11,8 @@ class ConfigError(Exception): ...
 _ENV_MAP = {
     "AEGIS_LLM_PROVIDER": ("llm", "provider"),
     "AEGIS_LLM_MODEL":    ("llm", "model"),
+    "AEGIS_WORKSPACE_ROOT": ("workspace", "root"),
+    "AEGIS_WORKSPACE_ALLOWED_BASE": ("workspace", "allowed_base"),
 }
 
 

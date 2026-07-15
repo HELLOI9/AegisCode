@@ -326,7 +326,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_serve = sub.add_parser("serve", help="run the localhost-only FastAPI panel")
     p_serve.add_argument("--host", default="127.0.0.1", help="bind host (localhost)")
-    p_serve.add_argument("--port", type=int, default=8000, help="bind port")
+    p_serve.add_argument(
+        "--port", type=int,
+        default=int(os.environ.get("PORT", "8000")),
+        help="bind port (defaults to $PORT or 8000)",
+    )
     p_serve.add_argument("--config", default=None, help="config path (default ./aegis.yaml)")
     p_serve.set_defaults(func=_cmd_serve)
 

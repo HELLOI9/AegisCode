@@ -14,6 +14,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["aegiscode*"]
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 # NOTE: do NOT add `ignore::starlette.exceptions.StarletteDeprecationWarning`
 # here. pytest imports the warning category eagerly at startup, and that symbol
 # does not exist on every starlette release — a clean install that resolves to a
