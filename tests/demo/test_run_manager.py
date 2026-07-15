@@ -104,6 +104,34 @@ class TestCleanup:
         assert result2["done"] is True
 
 
+class TestLazySweep:
+    def test_start_run_sweeps_orphaned_terminal_runs(self, tmp_path):
+        """A terminal run whose get_run() is never polled must still be
+        reclaimed. start_run() lazily sweeps previously-started terminal runs,
+        so cleanup does not depend on a client polling each specific run
+        (closed tab / crash / abandoned run in async mode).
+        """
+        mgr = _make_manager(tmp_path)
+
+        # sync=True -> the harness runs inline in start_run and the task is
+        # already terminal here. Deliberately do NOT call get_run(run1), so the
+        # get_run() fast-path cleanup never fires for it.
+        run1 = mgr.start_run("dangerous-action-denial")
+        ws1 = mgr._run_meta[run1]["workspace"]
+        assert os.path.isdir(ws1)
+
+        # Starting a new run must sweep run1's now-orphaned terminal workspace.
+        run2 = mgr.start_run("dangerous-action-denial")
+        assert not os.path.exists(ws1)
+
+        # run2's own workspace is still live (it was just created / swept path
+        # must not touch it), and run1's meta is preserved so a late get_run
+        # still works (idempotent).
+        assert os.path.isdir(mgr._run_meta[run2]["workspace"])
+        assert run1 in mgr._run_meta
+        assert mgr.get_run(run1)["done"] is True
+
+
 class TestUnknownScenario:
     def test_unknown_scenario_rejected(self, tmp_path):
         mgr = _make_manager(tmp_path)

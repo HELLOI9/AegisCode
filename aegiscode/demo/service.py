@@ -254,6 +254,8 @@ class DemoRunManager:
         """
         scenario = get_scenario(scenario_id)  # raises UnknownScenarioError
 
+        self._sweep_orphaned_runs()
+
         workspace = tempfile.mkdtemp(prefix="aegis_demorun_", dir=self._allowed_base)
         _materialize_fixture(scenario.fixture, workspace)
 
@@ -309,6 +311,32 @@ class DemoRunManager:
             shutil.rmtree(workspace, ignore_errors=True)
         self._ws_to_scenario.pop(workspace, None)
         self._ws_llms.pop(workspace, None)
+
+    def _sweep_orphaned_runs(self) -> None:
+        """Reclaim terminal-state runs whose temp workspace still exists.
+
+        Backstop for the ``get_run`` fast-path cleanup: in async mode a run
+        completes in a background thread, and if the client never polls
+        ``get_run`` again (closed tab, crash, abandoned run) the per-run
+        ``aegis_demorun_*`` dir would otherwise accumulate under
+        ``allowed_base`` forever. Called from ``start_run`` before creating a
+        new run, this bounds accumulation to the still-running + not-yet-swept
+        set.
+
+        ``_run_meta`` is intentionally NOT evicted -- an idempotent
+        ``get_run`` after cleanup must still return the settled result.
+        Reading task state is guarded so a missing task row never raises.
+        """
+        for run_id, meta in list(self._run_meta.items()):
+            workspace = meta.get("workspace")
+            if not workspace or not os.path.isdir(workspace):
+                continue
+            try:
+                state = self.service.get_task(run_id)["state"]
+            except KeyError:
+                continue
+            if state in _TERMINAL_STATES:
+                self._cleanup_workspace(workspace)
 
     def _harness_factory(
         self, task_id, workspace, approval_resolver=None, cancel_check=None, audit_conn=None
