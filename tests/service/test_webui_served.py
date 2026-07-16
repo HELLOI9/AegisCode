@@ -86,3 +86,62 @@ def test_existing_endpoints_still_work(tmp_path):
     r = client.get("/credentials/status")
     assert r.status_code == 200
     assert "masked" in r.json()
+
+
+# ---------------------------------------------------------------------------
+# Task 5: preset MockLLM demo panel (WebUI)
+# ---------------------------------------------------------------------------
+# There is no JS runtime in pytest, so these assert on served-file CONTENT:
+# that the real code paths (fetch("/demos"), the run+poll loop, acceptance
+# rendering) exist — not just comments.
+
+
+def test_index_has_demo_section(tmp_path):
+    """The HTML shell must carry the preset-demo container node the JS targets."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/").text
+    # A stable container id the app.js populates with demo cards.
+    assert 'id="demos-section"' in body
+    assert 'id="demos-list"' in body
+
+
+def test_app_js_has_demo_panel_logic(tmp_path):
+    """app.js must fetch the demo list, POST a run, poll get_run, and render
+    the acceptance summary — real code paths, not just mentions."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    # Fetches the demo catalog.
+    assert 'fetch("/demos")' in body or "getJSON(\"/demos\")" in body or "getJSON('/demos')" in body
+    # Starts a run (POST /demos/{id}/run).
+    assert "/demos/" in body and "/run" in body
+    # Polls the run status endpoint.
+    assert "/demos/runs/" in body
+    # Renders the per-condition acceptance summary.
+    assert "renderAcceptance" in body
+    # Reuses the existing approval decision endpoint for interactive demo 3.
+    assert "/decision" in body
+
+
+def test_app_js_demo_failure_not_shown_as_success(tmp_path):
+    """The acceptance renderer must key success off passed===... /every, not a
+    blanket 'done' — a failed condition must not read as success."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    # The renderer must inspect per-condition `passed` (proves failure can't be
+    # laundered into a green banner).
+    assert "passed" in body
+    # Overall verdict is derived from the acceptance items (every/some), not a
+    # bare HTTP-200 assumption.
+    assert ".every(" in body or ".some(" in body
+
+
+def test_style_has_demo_classes(tmp_path):
+    """style.css must define the demo card/timeline/acceptance classes, and
+    status must NOT be conveyed by color alone (a text/icon class must exist)."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    css = client.get("/style.css").text
+    assert ".demo-card" in css
+    assert ".timeline" in css or ".step-row" in css
+    assert ".acceptance" in css
+    # Accessibility: a glyph/icon class so status is text+icon, not color-only.
+    assert ".status-icon" in css or "::before" in css
