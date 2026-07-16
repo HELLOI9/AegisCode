@@ -212,7 +212,23 @@
   // --- start handler -----------------------------------------------------
   startForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const workspace = $("workspace").value.trim();
+
+    // Demo mode: Workspace path is the preset-demo selector. Start runs the
+    // chosen demo through the Demo API (not POST /tasks). runDemo owns the
+    // Start/selector disabled state and the run-detail rendering.
+    if (demoMode) {
+      const demoId = workspaceSelect.value;
+      if (!demoId) {
+        taskIdLabel.textContent = "请先选择一个预设演示 · pick a demo first";
+        return;
+      }
+      const meta = demoMeta[demoId];
+      runDemo(demoId, meta ? meta.title || demoId : demoId);
+      return;
+    }
+
+    // Standard mode: free-text workspace + description → POST /tasks.
+    const workspace = workspaceInput.value.trim();
     const description = $("description").value.trim();
     if (!workspace || !description) return;
 
@@ -239,17 +255,293 @@
 
   loadCredentialStatus();
 
+  // ===================== Preset MockLLM demos ============================
+  // Independent poll state from the standard task view above, so a running
+  // demo never collides with a manually-started task.
+  const DEMO_POLL_MS = 1200;
+  let demoRunId = null;
+  let demoPollTimer = null;
+  let currentDemoId = null;
+
+  const workspaceInput = $("workspace");
+  const workspaceSelect = $("workspace-select");
+  const demoObjective = $("demo-objective");
+  const demoRun = $("demo-run");
+
+  // Demo metadata keyed by scenario id (populated from GET /demos). Drives the
+  // Workspace-path selector's auto-fill of the Task description (§十六).
+  const demoMeta = {};
+  let demoMode = false;
+
+  function shortType(t) {
+    if (!t) return "EVENT";
+    const s = String(t);
+    const i = s.lastIndexOf(".");
+    return i >= 0 ? s.slice(i + 1) : s;
+  }
+
+  // Fetch the demo catalog, index it by id, and wire the selector so that
+  // choosing a demo auto-fills the Task description with that demo's preset
+  // (and shows its learning objective). The <option> values are the backend
+  // scenario ids (dangerous-action-denial / feedback-driven-repair /
+  // approval-binding-invalidation); the labels shown are demo1/demo2/demo3.
+  async function loadDemoSelector() {
+    let demos;
+    try {
+      demos = await getJSON("/demos");
+    } catch (e) {
+      demoObjective.textContent = "无法加载演示列表 (unavailable): " + e.message;
+      return;
+    }
+    demos.forEach((d) => {
+      demoMeta[d.id] = d;
+    });
+    workspaceSelect.addEventListener("change", () => {
+      const d = demoMeta[workspaceSelect.value];
+      if (!d) return;
+      // Auto-fill the task description with the demo's preset.
+      $("description").value = d.description || d.title || d.id;
+      const bits = [];
+      if (d.learning_objective) bits.push("目标 · " + d.learning_objective);
+      if (d.interactive_approval) bits.push("需人工审批 · interactive approval");
+      demoObjective.textContent = bits.join("    ·    ");
+    });
+  }
+
+  function stopDemoPolling() {
+    if (demoPollTimer !== null) {
+      clearInterval(demoPollTimer);
+      demoPollTimer = null;
+    }
+  }
+
+  async function runDemo(demoId, title) {
+    // Disable Start + selector while a demo is in flight (avoid double-fire).
+    startBtn.disabled = true;
+    workspaceSelect.disabled = true;
+    currentDemoId = demoId;
+    demoRun.classList.remove("hidden");
+    demoRun.innerHTML = "";
+    demoRun.appendChild(el("div", "demo-run-title", title));
+    const status = el("div", "demo-status");
+    status.id = "demo-status";
+    demoRun.appendChild(status);
+    setDemoStatus("准备中", "prep", "准备中 · preparing");
+    try {
+      const res = await postJSON("/demos/" + encodeURIComponent(demoId) + "/run", {});
+      demoRunId = res.run_id;
+    } catch (e) {
+      setDemoStatus("失败", "fail", "启动失败 · " + e.message);
+      startBtn.disabled = false;
+      workspaceSelect.disabled = false;
+      return;
+    }
+    // Timeline + approval + acceptance + raw-events containers.
+    ["demo-timeline", "demo-approvals", "demo-acceptance", "demo-raw"].forEach((cls) => {
+      const box = el("div", cls);
+      box.id = cls;
+      demoRun.appendChild(box);
+    });
+    startDemoPolling();
+  }
+
+  function startDemoPolling() {
+    stopDemoPolling();
+    pollDemo();
+    demoPollTimer = setInterval(pollDemo, DEMO_POLL_MS);
+  }
+
+  function setDemoStatus(label, kind, longText) {
+    const status = $("demo-status");
+    if (!status) return;
+    status.className = "demo-status " + kind;
+    status.innerHTML = "";
+    // Text + icon (never color alone) for accessibility.
+    const icon = el("span", "status-icon");
+    const glyph = { prep: "…", run: "⏳", wait: "⏸", ok: "✓", fail: "✗", cancel: "⊘" }[kind] || "•";
+    icon.textContent = glyph;
+    icon.setAttribute("aria-hidden", "true");
+    status.appendChild(icon);
+    status.appendChild(el("span", "status-text", longText || label));
+    status.setAttribute("role", "status");
+  }
+  async function pollDemo() {
+    if (!demoRunId) return;
+    try {
+      const run = await getJSON("/demos/runs/" + demoRunId);
+      const approvals = await getJSON("/tasks/" + demoRunId + "/approvals");
+      const pending = (approvals || []).filter(
+        (a) => (a.state || "").toUpperCase() === "PENDING"
+      );
+      renderDemoTimeline(run.steps || []);
+      renderDemoApprovals(pending);
+      renderAcceptance(run.acceptance || [], run.state, run.done);
+      await renderDemoRawEvents();
+
+      // Status precedence: pending approval > running > terminal verdict.
+      if (pending.length > 0) {
+        setDemoStatus("等待审批", "wait", "等待审批 · awaiting approval");
+      } else if (!run.done) {
+        setDemoStatus("运行中", "run", "运行中 · running (round " + (run.steps ? run.steps.length : 0) + ")");
+      }
+      if (run.done) {
+        stopDemoPolling();
+        startBtn.disabled = false;
+        workspaceSelect.disabled = false;
+        addRerunButton();
+      }
+    } catch (e) {
+      /* transient; a later cycle recovers */
+    }
+  }
+
+  function renderDemoTimeline(steps) {
+    const box = $("demo-timeline");
+    if (!box) return;
+    box.innerHTML = "";
+    box.appendChild(el("div", "demo-sub", "分步时间线 · step timeline"));
+    if (steps.length === 0) {
+      box.appendChild(el("div", "muted", "尚无步骤 · no steps yet"));
+      return;
+    }
+    steps.forEach((s, i) => {
+      const row = el("div", "step-row");
+      row.appendChild(el("span", "step-idx", "#" + (i + 1)));
+      if (s.tool) row.appendChild(el("span", "step-tool", String(s.tool)));
+      if (s.governance_decision)
+        row.appendChild(el("span", "gov-tag", "治理 " + String(s.governance_decision)));
+      // Whether the tool actually executed.
+      const ran = s.tool_status ? "执行:" + String(s.tool_status) : "工具未执行";
+      row.appendChild(el("span", "exec-tag", ran));
+      if (s.approval_state)
+        row.appendChild(el("span", "appr-tag", "审批 " + String(s.approval_state)));
+      if (s.feedback_category)
+        row.appendChild(el("span", "fb-tag", "反馈 " + String(s.feedback_category)));
+      box.appendChild(row);
+    });
+  }
+
+  function renderDemoApprovals(pending) {
+    const box = $("demo-approvals");
+    if (!box) return;
+    box.innerHTML = "";
+    if (pending.length === 0) return;
+    pending.forEach((a) => {
+      const card = el("div", "approval");
+      card.appendChild(el("div", "type", a.reason || "需要审批 · approval required"));
+      if (a.risk_explanation) card.appendChild(el("div", "muted", a.risk_explanation));
+      const snap = parsePayload(a.action_snapshot_json);
+      const pre = el("pre");
+      pre.textContent = JSON.stringify(snap, null, 2);
+      card.appendChild(pre);
+      const buttons = el("div", "buttons");
+      const ok = el("button", "approve", "批准原动作 · Approve");
+      const no = el("button", "reject", "拒绝 · Reject");
+      ok.onclick = () => decideDemo(a.approval_id, true);
+      no.onclick = () => decideDemo(a.approval_id, false);
+      buttons.appendChild(ok);
+      buttons.appendChild(no);
+      card.appendChild(buttons);
+      box.appendChild(card);
+    });
+  }
+
+  async function decideDemo(approvalId, approved) {
+    try {
+      await postJSON("/approvals/" + approvalId + "/decision", { approved: approved });
+    } catch (e) {
+      /* transient; next poll re-renders */
+    }
+    pollDemo();
+  }
+  function renderAcceptance(acceptance, state, done) {
+    const box = $("demo-acceptance");
+    if (!box) return;
+    box.innerHTML = "";
+    box.appendChild(el("div", "demo-sub", "验收摘要 · acceptance"));
+    acceptance.forEach((c) => {
+      const row = el("div", "acc-row " + (c.passed ? "acc-pass" : "acc-fail"));
+      const icon = el("span", "status-icon");
+      icon.textContent = c.passed ? "✓" : "✗";
+      icon.setAttribute("aria-hidden", "true");
+      row.appendChild(icon);
+      row.appendChild(el("span", "acc-label", (c.label || c.key) + (c.passed ? " · PASS" : " · FAIL")));
+      box.appendChild(row);
+    });
+    if (!done) return;
+    // Success is defined by the scenario's acceptance conditions — the SAME
+    // success_conditions `make demo` asserts — never by the harness terminal
+    // state. dangerous-action-denial deliberately ends via MAX_STEPS (a
+    // non-COMPLETED terminal state) on a fully-passing DENY-only run
+    // (max_steps=1), so gating on that terminal state would render a correct
+    // run as a failure. A failure still can NEVER be laundered into success:
+    // the banner is green ONLY when every acceptance condition passed. A
+    // user-initiated CANCELLED (with unmet conditions) is surfaced distinctly.
+    const upState = (state || "").toUpperCase();
+    const allPass = acceptance.length > 0 && acceptance.every((c) => c.passed === true);
+    if (allPass) {
+      setDemoStatus("成功", "ok", "演示成功 · all acceptance conditions passed");
+    } else if (upState === "CANCELLED") {
+      setDemoStatus("已取消", "cancel", "已取消 · cancelled");
+    } else {
+      const failed = acceptance.filter((c) => !c.passed).map((c) => c.key);
+      setDemoStatus("失败", "fail", "演示失败 · failed" + (failed.length ? " (" + failed.join(", ") + ")" : ""));
+    }
+  }
+
+  async function renderDemoRawEvents() {
+    const box = $("demo-raw");
+    if (!box) return;
+    let events;
+    try {
+      events = await getJSON("/tasks/" + demoRunId + "/events?since=0");
+    } catch (e) {
+      return;
+    }
+    box.innerHTML = "";
+    const details = document.createElement("details");
+    details.className = "raw-events";
+    const summary = document.createElement("summary");
+    summary.textContent = "查看结构化事件 · view structured events (" + events.length + ")";
+    details.appendChild(summary);
+    events.forEach((ev) => {
+      const line = el("div", "raw-line");
+      line.appendChild(el("span", "type", shortType(ev.event_type)));
+      line.appendChild(el("span", "step", "#" + ev.event_id + " · step " + ev.step_index));
+      const pre = el("pre");
+      pre.textContent = JSON.stringify(parsePayload(ev.payload_json), null, 2);
+      line.appendChild(pre);
+      details.appendChild(line);
+    });
+    box.appendChild(details);
+  }
+
+  function addRerunButton() {
+    if (demoRun.querySelector(".demo-rerun")) return;
+    const btn = el("button", "demo-rerun", "重新运行 · Re-run");
+    btn.onclick = () => {
+      const id = currentDemoId;
+      const meta = demoMeta[id];
+      runDemo(id, meta ? meta.title || id : id);
+    };
+    demoRun.appendChild(btn);
+  }
+
   // --- demo mode UI adaptation -------------------------------------------
   (async function loadUiConfig() {
     try {
       const cfg = await getJSON("/ui-config");
       if (cfg.demo_mode) {
-        const wsInput = $("workspace");
-        wsInput.value = "demo";
-        wsInput.disabled = true;
-        wsInput.title = "Demo mode: workspace is fixed to the built-in sample project";
-        // Remove the required constraint on a disabled field
-        wsInput.removeAttribute("required");
+        demoMode = true;
+        // Workspace path becomes the preset-demo selector (§十六): hide the
+        // free-text input, reveal the selector, and load the catalog so
+        // choosing a demo auto-fills the task description.
+        workspaceInput.classList.add("hidden");
+        workspaceInput.removeAttribute("required");
+        workspaceSelect.classList.remove("hidden");
+        $("description").readOnly = true;  // preset-driven in demo mode
+        $("description").title = "Demo mode: description is auto-filled from the selected demo";
+        await loadDemoSelector();
       }
     } catch (e) { /* non-critical */ }
   })();

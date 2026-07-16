@@ -86,3 +86,101 @@ def test_existing_endpoints_still_work(tmp_path):
     r = client.get("/credentials/status")
     assert r.status_code == 200
     assert "masked" in r.json()
+
+
+# ---------------------------------------------------------------------------
+# Task 5: preset MockLLM demo panel (WebUI)
+# ---------------------------------------------------------------------------
+# There is no JS runtime in pytest, so these assert on served-file CONTENT:
+# that the real code paths (fetch("/demos"), the run+poll loop, acceptance
+# rendering) exist — not just comments.
+
+
+def test_index_has_workspace_demo_selector(tmp_path):
+    """In the demo-entry UI (§十六), Workspace path is a <select> whose options
+    are demo1/demo2/demo3, and the run-detail panel container is present."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/").text
+    # Workspace path is a selector, not just a free-text input.
+    assert 'id="workspace-select"' in body
+    # The three demo options are present by their user-facing labels.
+    assert "demo1" in body and "demo2" in body and "demo3" in body
+    # The run-detail panel the JS renders into.
+    assert 'id="demo-run"' in body
+
+
+def test_app_js_has_demo_selector_logic(tmp_path):
+    """app.js must: fetch /demos, auto-fill the task description on selection,
+    POST /demos/{id}/run on Start, poll /demos/runs/, render acceptance, and
+    reuse the existing approval decision endpoint for demo 3."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    # Fetches the demo catalog to populate the selector + description presets.
+    assert 'getJSON("/demos")' in body or "getJSON('/demos')" in body
+    # Auto-fills the task description when a demo is selected (change handler).
+    assert 'addEventListener("change"' in body
+    # Starts the selected demo via the Demo API.
+    assert "/demos/" in body and "/run" in body
+    # Polls the run status endpoint.
+    assert "/demos/runs/" in body
+    # Renders the per-condition acceptance summary.
+    assert "renderAcceptance" in body
+    # Reuses the existing approval decision endpoint for interactive demo 3.
+    assert "/decision" in body
+
+
+def test_app_js_maps_demo_labels_to_scenario_ids(tmp_path):
+    """The three user-facing labels demo1/demo2/demo3 must map to the three
+    backend scenario ids so Start runs the correct MockLLM script."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    assert "dangerous-action-denial" in body
+    assert "feedback-driven-repair" in body
+    assert "approval-binding-invalidation" in body
+
+
+def test_app_js_demo_failure_not_shown_as_success(tmp_path):
+    """The acceptance renderer must key success off passed===... /every, not a
+    blanket 'done' — a failed condition must not read as success."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    # The renderer must inspect per-condition `passed` (proves failure can't be
+    # laundered into a green banner).
+    assert "passed" in body
+    # Overall verdict is derived from the acceptance items (every/some), not a
+    # bare HTTP-200 assumption.
+    assert ".every(" in body or ".some(" in body
+
+
+def test_app_js_demo1_success_not_gated_by_failed_state(tmp_path):
+    """`dangerous-action-denial` ends state=FAILED BY DESIGN (max_steps=1,
+    DENY-only → MAX_STEPS → non-COMPLETED → "FAILED"), yet all its acceptance
+    conditions pass. The WebUI verdict must derive from the scenario's acceptance
+    conditions (the same success_conditions `make demo` uses), NOT the harness
+    terminal state — otherwise the flagship demo's fully-passing run renders as a
+    red failure. Guard: renderAcceptance must not gate its success verdict on a
+    FAILED terminal state."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    assert "function renderAcceptance" in body
+    region = body.split("function renderAcceptance", 1)[1]
+    region = region.split("\n  function ", 1)[0]  # scope to renderAcceptance body
+    assert "FAILED" not in region, (
+        "renderAcceptance must not treat a FAILED terminal state as an automatic "
+        "failure — success is defined by acceptance.every(passed)"
+    )
+    assert ".every(" in region
+
+
+def test_style_has_demo_classes(tmp_path):
+    """style.css must define the demo card/timeline/acceptance classes, and
+    status must NOT be conveyed by color alone (a text/icon class must exist)."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    css = client.get("/style.css").text
+    # Classes actually applied by app.js (no dead selectors).
+    assert ".demo-timeline" in css
+    assert ".step-row" in css
+    assert ".demo-acceptance" in css
+    assert ".acc-row" in css
+    # Accessibility: a glyph/icon class so status is text+icon, not color-only.
+    assert ".status-icon" in css

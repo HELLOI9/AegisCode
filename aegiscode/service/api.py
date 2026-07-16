@@ -10,16 +10,19 @@ plaintext credential value is never included in any API response.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from aegiscode.credentials.store import CredentialStore
+from aegiscode.demo.scenarios import UnknownScenarioError
+from aegiscode.security.redactor import redact
 from aegiscode.service.app_service import ApplicationService, WorkspaceNotAllowedError
 from aegiscode.service.demo_mode import (
     cleanup_demo_workspace,
@@ -53,6 +56,7 @@ class DecisionRequest(BaseModel):
 def build_app(
     service: ApplicationService,
     credential_store: Optional[CredentialStore] = None,
+    demo_manager: Optional[Any] = None,
 ) -> FastAPI:
     """Build and return a FastAPI application wired to the given ApplicationService.
 
@@ -65,6 +69,10 @@ def build_app(
         Optional CredentialStore for the /credentials/status endpoint. When
         None, a no-op store (always unconfigured) is used so the endpoint
         remains functional without leaking secrets.
+    demo_manager:
+        Optional DemoRunManager. When provided, mounts GET /demos,
+        POST /demos/{demo_id}/run, and GET /demos/runs/{run_id}. When None,
+        these routes are not mounted at all.
     """
     app = FastAPI(
         title="AegisCode Local Panel",
@@ -162,10 +170,13 @@ def build_app(
         """Return audit events for the task with event_id > since."""
         # Validate task exists first (raises 404 if not)
         try:
-            service.get_task(task_id)
+            task = service.get_task(task_id)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
-        return service.get_events(task_id, since)
+        events = service.get_events(task_id, since)
+        workspace_path = task.get("workspace_path")
+        redacted_text = redact(json.dumps(events), workspace_root=workspace_path)
+        return json.loads(redacted_text)
 
     # -----------------------------------------------------------------------
     # Endpoint: GET /tasks/{id}/approvals
@@ -257,5 +268,41 @@ def build_app(
     def webui_style_css() -> FileResponse:
         """Serve the WebUI stylesheet."""
         return FileResponse(_webui_dir / "style.css", media_type="text/css")
+
+    # -----------------------------------------------------------------------
+    # Demo endpoints (only mounted when a DemoRunManager is supplied)
+    # -----------------------------------------------------------------------
+    if demo_manager is not None:
+
+        @app.get("/demos")
+        def list_demos() -> list:
+            """List available demo scenarios."""
+            return [
+                {
+                    "id": s.id,
+                    "title": s.title,
+                    "description": s.description,
+                    "learning_objective": s.learning_objective,
+                    "interactive_approval": s.interactive_approval,
+                }
+                for s in demo_manager.list_scenarios()
+            ]
+
+        @app.post("/demos/{demo_id}/run")
+        def run_demo(demo_id: str, request: Request) -> dict:
+            """Start a demo run. Any client-supplied JSON body is ignored."""
+            try:
+                run_id = demo_manager.start_run(demo_id)
+            except UnknownScenarioError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            return {"run_id": run_id}
+
+        @app.get("/demos/runs/{run_id}")
+        def get_demo_run(run_id: str) -> dict:
+            """Get the status of a demo run."""
+            try:
+                return demo_manager.get_run(run_id)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
 
     return app

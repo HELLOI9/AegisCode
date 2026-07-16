@@ -60,6 +60,49 @@ def check_no_secrets(base_url: str) -> tuple[bool, str]:
     return True, "/healthz contains no sensitive patterns"
 
 
+_EXPECTED_DEMO_IDS = {
+    "dangerous-action-denial",
+    "feedback-driven-repair",
+    "approval-binding-invalidation",
+}
+
+
+def check_demos_listed(base_url: str) -> tuple[bool, str]:
+    """Verify GET /demos lists the three preset MockLLM demos.
+
+    Non-destructive: only reads the demo catalog (does NOT start any run, so it
+    never mutates shared state or runs the interactive demo③). A deployment
+    without the demo panel (or in standard mode) will not expose /demos.
+    """
+    url = base_url.rstrip("/") + "/demos"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status != 200:
+                return False, f"/demos returned {resp.status}"
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+        return False, f"/demos failed: {e}"
+
+    ids = {d.get("id") for d in data} if isinstance(data, list) else set()
+    missing = _EXPECTED_DEMO_IDS - ids
+    if missing:
+        return False, f"/demos missing expected demos: {sorted(missing)}"
+    return True, f"/demos lists all three preset demos: {sorted(_EXPECTED_DEMO_IDS)}"
+
+
+def _is_demo_mode(base_url: str) -> bool:
+    """Best-effort read of the deployment mode from /healthz (default False)."""
+    url = base_url.rstrip("/") + "/healthz"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, json.JSONDecodeError):
+        return False
+    return data.get("mode") == "demo"
+
+
 def check_webui(base_url: str) -> tuple[bool, str]:
     """Verify the WebUI root is accessible."""
     url = base_url.rstrip("/") + "/"
@@ -92,6 +135,12 @@ def main() -> int:
         check_no_secrets,
         check_webui,
     ]
+
+    # In Demo Mode the deployment must also expose the preset-demo catalog.
+    # Detect the mode from /healthz so a standard (non-demo) deployment — which
+    # does not mount /demos — is not failed by this check.
+    if _is_demo_mode(base_url):
+        checks.append(check_demos_listed)
 
     all_pass = True
     for check_fn in checks:
