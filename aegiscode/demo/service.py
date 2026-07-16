@@ -338,10 +338,50 @@ class DemoRunManager:
             if state in _TERMINAL_STATES:
                 self._cleanup_workspace(workspace)
 
+    def _fallback_harness(self, task_id, workspace, cancel_check, audit_conn):
+        """Keyless harness for a workspace this manager never registered.
+
+        Reached when create_task runs on a workspace that did NOT come through
+        ``start_run`` (e.g. a manual POST /tasks in demo mode, whose ephemeral
+        demo workspace this manager doesn't know). Using an empty ``MockLLM``
+        makes the run terminate as LLM_ERROR on the first turn instead of
+        raising ``KeyError`` here — which, on the async run thread, would leave
+        the task stuck RUNNING. Demo runs never hit this path: ``start_run``
+        always registers the workspace first.
+        """
+        config = AegisConfig(
+            workspace=Workspace(root=workspace, allowed_base=self._allowed_base)
+        )
+        registry = _build_registry(config)
+        dispatcher = build_dispatcher(config, registry)
+
+        def resolve(p: str) -> str:
+            return p if os.path.isabs(p) else os.path.join(workspace, p)
+
+        ctx = SimpleNamespace(
+            task_id=task_id,
+            workspace_root=workspace,
+            resolve=resolve,
+            snapshot=lambda abspath: None,
+            write_max_bytes=config.tools.write_max_bytes,
+        )
+        audit_log = AuditLog(audit_conn if audit_conn is not None else self._conn)
+        return HarnessCore(
+            llm=MockLLM([]),
+            dispatcher=dispatcher,
+            audit=audit_log,
+            config=config,
+            ctx=ctx,
+            final_verifier=lambda: False,
+            cancel_check=cancel_check,
+        )
+
     def _harness_factory(
         self, task_id, workspace, approval_resolver=None, cancel_check=None, audit_conn=None
     ):
-        scenario_id = self._ws_to_scenario[workspace]
+        scenario_id = self._ws_to_scenario.get(workspace)
+        if scenario_id is None:
+            return self._fallback_harness(task_id, workspace, cancel_check, audit_conn)
         scenario = get_scenario(scenario_id)
 
         config = _build_config(scenario, workspace, self._allowed_base)

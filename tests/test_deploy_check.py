@@ -5,7 +5,13 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, "scripts")
-from deploy_check import check_healthz, check_no_secrets, check_webui, main
+from deploy_check import (
+    check_demos_listed,
+    check_healthz,
+    check_no_secrets,
+    check_webui,
+    main,
+)
 
 
 class FakeResponse:
@@ -80,6 +86,30 @@ def test_check_webui_missing_marker():
     assert not ok
 
 
+def test_check_demos_listed_pass():
+    body = (
+        '[{"id":"dangerous-action-denial"},'
+        '{"id":"feedback-driven-repair"},'
+        '{"id":"approval-binding-invalidation"}]'
+    )
+    with _mock_urlopen(body):
+        ok, msg = check_demos_listed("http://test")
+    assert ok is True
+
+
+def test_check_demos_listed_missing_one():
+    body = '[{"id":"dangerous-action-denial"},{"id":"feedback-driven-repair"}]'
+    with _mock_urlopen(body):
+        ok, msg = check_demos_listed("http://test")
+    assert ok is False
+
+
+def test_check_demos_listed_non_200():
+    with _mock_urlopen("[]", status=404):
+        ok, msg = check_demos_listed("http://test")
+    assert ok is False
+
+
 def test_main_no_url():
     with patch("sys.argv", ["deploy_check.py"]):
         assert main() == 1
@@ -88,11 +118,18 @@ def test_main_no_url():
 def test_main_all_pass():
     body_healthz = '{"status":"ok","service":"aegiscode","mode":"demo"}'
     body_webui = "<html>AegisCode</html>"
+    body_demos = (
+        '[{"id":"dangerous-action-denial"},'
+        '{"id":"feedback-driven-repair"},'
+        '{"id":"approval-binding-invalidation"}]'
+    )
 
     def fake_open(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else str(req)
         if "healthz" in url:
             return FakeResponse(200, body_healthz)
+        if url.rstrip("/").endswith("/demos"):
+            return FakeResponse(200, body_demos)
         return FakeResponse(200, body_webui)
 
     with patch("deploy_check.urllib.request.urlopen", side_effect=fake_open):

@@ -200,12 +200,45 @@ def _watch(service, task_id: str) -> None:
 # --------------------------------------------------------------------------
 
 
+def build_serve_app(cfg, store, db_path: str):
+    """Assemble the FastAPI app the `serve` command runs (no socket bound).
+
+    Factored out of _cmd_serve so the demo-aware wiring is unit-testable.
+
+    In Demo Mode (AEGIS_DEMO_MODE=1) the app is backed by a ``DemoRunManager``
+    and mounts the preset-demo endpoints (GET /demos, POST /demos/{id}/run,
+    GET /demos/runs/{id}). The manager's own ApplicationService IS the app's
+    service, so the existing /tasks/{run_id}/events + /approvals + /decision
+    routes operate on demo runs (run_id == task_id). Its harness_factory
+    reverse-looks-up scenarios by workspace; a workspace it did not register
+    (e.g. a manual POST /tasks) falls back to a keyless MockLLM harness that
+    terminates as LLM_ERROR rather than crashing the run thread.
+
+    In standard mode the app is the plain panel (no demo routes) — behavior
+    unchanged.
+    """
+    from aegiscode.service.api import build_app
+    from aegiscode.service.assembly import build_service
+    from aegiscode.service.demo_mode import is_demo_mode
+
+    if is_demo_mode():
+        from aegiscode.demo.service import DemoRunManager
+
+        allowed_base = cfg.workspace.allowed_base or cfg.workspace.root
+        demo_manager = DemoRunManager(allowed_base=allowed_base, db_path=db_path)
+        return build_app(
+            demo_manager.service, credential_store=store, demo_manager=demo_manager
+        )
+
+    service = build_service(cfg, store, db_path, sync=False)
+    return build_app(service, credential_store=store)
+
+
 def _cmd_serve(args) -> int:
     import uvicorn
 
     from aegiscode.credentials.backend import build_credential_store
-    from aegiscode.service.api import build_app
-    from aegiscode.service.assembly import NoKeyError, build_service
+    from aegiscode.service.assembly import NoKeyError
 
     try:
         cfg = _load_config(args.config)
@@ -217,12 +250,10 @@ def _cmd_serve(args) -> int:
     db_path = str(_data_dir() / "aegis.db")
 
     try:
-        service = build_service(cfg, store, db_path, sync=False)
+        app = build_serve_app(cfg, store, db_path)
     except NoKeyError as exc:
         print(f"cannot serve: {exc}", file=sys.stderr)
         return 1
-
-    app = build_app(service, credential_store=store)
 
     print("=" * 60)
     print("AegisCode local panel — SECURITY NOTICE")
