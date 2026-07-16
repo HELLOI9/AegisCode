@@ -2897,14 +2897,14 @@ git commit -m "ci: unit-test job + secret scan + docker build"
   - 新增 WebUI 预设演示面板（`aegiscode/service/webui/{index.html,app.js,style.css}`：三卡片 + 时间线 + 治理标签 + 审批面板 + 验收摘要 + 重跑；验收判定源自 `success_conditions`，非 HTTP 200）
   - demo-aware serve 装配（`aegiscode/cli.py::build_serve_app`）
   - `scripts/deploy_check.py` 新增非破坏性 `check_demos_listed`（demo 模式门控，不跑完整 Demo 3）
-- **新增测试**：74 个（scenarios 38 / cli-uses-registry 4 / run_manager 8 / demo_api 8 / webui 5 / cli-web-consistency 5 / serve-wiring 3 / deploy_check 3）；`make test` 344→**418 passed**。CLI/Web 一致性测试确保无「前端成功而 `make demo` 失败」分叉。
+- **新增测试**：75 个（scenarios 38 / cli-uses-registry 4 / run_manager 8 / demo_api 8 / webui 6 / cli-web-consistency 5 / serve-wiring 3 / deploy_check 3）；`make test` 344→**419 passed**（webui 含选择器改造后的 6 个 served-file 断言）。CLI/Web 一致性测试确保无「前端成功而 `make demo` 失败」分叉。
 - **TDD**：每任务 RED→GREEN；I-1/M-1 修复测试经 mutation→RED 验证。
-- **验证结果**：`make test` → 418 passed；`make demo` → 3 passed/0 failed；`docker build -t aegiscode:web-demo .` OK；本地 Docker Demo Mode 容器 HTTP 实测三项 Demo 全通过（Demo1 0 执行全验收、Demo2 COMPLETED、Demo3 真实人工审批 + SUPERSEDED），无路径/密钥泄漏、无未处理异常、400/404 正确。
+- **验证结果**：`make test` → 419 passed；`make demo` → 3 passed/0 failed；`docker build -t aegiscode:web-demo .` OK；本地 Docker Demo Mode 容器 HTTP 实测三项 Demo 全通过（Demo1 0 执行全验收、Demo2 COMPLETED、Demo3 真实人工审批 + SUPERSEDED），无路径/密钥泄漏、无未处理异常、400/404 正确。
 - **评审**：每任务两阶段评审 + whole-branch 终审（opus）= ✅ MERGE，0 Critical、1 Important（I-1，已闭环）+ 4 Minor（M-1 已闭环；M-2/M-4 预存/范围外；M-3 安全降级）。
-- **实现 commit**：分支 `worktree-webui-mock-demos` 10 commit（`6bc4d86`→`1b82575`）
-- **PR**：[#12](https://github.com/HELLOI9/AegisCode/pull/12)
-- **Render deploy**：待人工执行（合并 → checksPass 自动重部署）
-- **公网人工验收结果**：⏳ 待执行（真实公网 URL 点击三项 Demo + `make deploy-check`）
+- **实现 commit**：分支 `worktree-webui-mock-demos`（`6bc4d86`→`cdec3fd`；含用户反馈后把入口从三卡片改为 §十六 Workspace-path 下拉选择器 + 自动填充 `a8eac20`）
+- **PR**：[#12](https://github.com/HELLOI9/AegisCode/pull/12)（已合并，squash → main `fb7029f`）
+- **Render deploy**：✅ 已重部署（main `fb7029f`，https://aegiscode-o20h.onrender.com）
+- **公网人工验收结果**：✅ **通过（2026-07-16）**——公网 `/healthz` mode=demo、`/ui-config` demo_mode=true、`/demos`=200,Workspace-path 下拉可选 demo1/2/3、选中自动填充 task description、三项 Demo 人工点击(含 Demo 3 审批交互)均正常,未发现问题。
 
 ---
 
