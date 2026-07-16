@@ -1,6 +1,6 @@
 # AegisCode — 验收追溯矩阵 (ACCEPTANCE)
 
-本文件把课程验收清单(见 `docs/SPEC.md` §15 与 acceptance spec §十)的每条要求映射到**可定位的真实证据**:实现文件、自动化测试(文件 + 函数名)、演示/证据命令、状态。每个单元格都是可 grep / 可复跑的引用,而非「已完成」空话。基线数据(本 worktree `m8-hardening`,`./.venv/bin/python` 复跑):`make test` → **325 passed, 1 warning**;`make demo`(`python -m demos.run_demos`)→ **3 passed, 0 failed (exit 0)**。
+本文件把课程验收清单(见 `docs/SPEC.md` §15 与 acceptance spec §十)的每条要求映射到**可定位的真实证据**:实现文件、自动化测试(文件 + 函数名)、演示/证据命令、状态。每个单元格都是可 grep / 可复跑的引用,而非「已完成」空话。基线数据(当前 worktree `webui-mock-demos`,追加任务 C 完成后,root venv 复跑):`make test` → **418 passed, 1 warning**;`make demo`(`python -m demos.run_demos`)→ **3 passed, 0 failed (exit 0)**。(历史基线:`m8-hardening` 曾为 325 passed;追加任务 B Render 部署后 344;追加任务 C 加 74 个演示测试 → 418。下方部分早期行内引用的 325 为当时任务验证时的历史计数,未回改。)
 
 ---
 
@@ -25,6 +25,22 @@
 | Demo Mode | `aegiscode/service/demo_mode.py` + `api.py` 集成 + WebUI `app.js` 前端适配 | `tests/service/test_demo_mode.py`(7 tests: 路径拒绝、demo sentinel、临时工作区创建/清理、/healthz mode 报告) | Docker 容器 Demo Mode: 任意路径 400, demo workspace 创建成功, /ui-config=true | ✅ 通过 |
 | 部署验证命令 | `Makefile::deploy-check` + `scripts/deploy_check.py` | `tests/test_deploy_check.py`(9 tests: healthz/secrets/webui/main 逻辑) | `make deploy-check DEPLOY_URL=https://aegiscode-o20h.onrender.com` → exit 0 | ✅ 通过 |
 | CI/CD 联动 | GitHub Actions CI + Render GitHub Integration (checksPass) | CI pass → Render auto-deploy | Render Service 已连接, PR #11 合并后自动部署成功 | ✅ 通过 |
+
+### WebUI 预设 MockLLM 演示(追加任务 C)
+
+三个 Demo 复用共享场景层 `aegiscode/demo/scenarios.py`(唯一真相源:相同 id/`mock_script`/`success_conditions`),经 `DemoRunManager`(`aegiscode/demo/service.py`)真实驱动 HarnessCore + MockLLM + 治理 + 反馈 + 审批状态机 + 审计;Demo API 见 `aegiscode/service/api.py`(`GET /demos` / `POST /demos/{id}/run` / `GET /demos/runs/{id}`,审批复用既有 `/approvals/{id}/decision`)。本地基线:`make test` → **418 passed**;`make demo` → **3 passed, 0 failed**。
+
+| 要求 | 实现位置 | 自动测试 | 公网证据 | 状态 |
+|---|---|---|---|---|
+| Web Demo 列表 | `scenarios.REGISTRY` + `api.py` `GET /demos` | `tests/service/test_demo_api.py::test_list_demos_returns_three_scenarios` | 公网页面「预设机制演示」三卡片 | ⏳ 待公网人工验收 |
+| 危险动作演示 | 共享场景 `dangerous-action-denial` | `tests/demo/test_scenarios.py`、`test_run_manager.py::test_denial_run_zero_exec_and_deny`、`demos/demo1_dangerous_denied.py` | Web Demo 1(DENY,0 执行);本地 Docker 已验 | ⏳ 待公网人工验收 |
+| 反馈修正演示 | 共享场景 `feedback-driven-repair` | `test_run_manager.py::test_feedback_run_completes`、`demos/demo2_feedback_loop.py` | Web Demo 2(TEST_FAILURE→修复→COMPLETED);本地 Docker 已验 | ⏳ 待公网人工验收 |
+| 审批失效演示 | 共享场景 `approval-binding-invalidation` + `dispatcher.execute_approved`/`approval.validate_resume` | `test_demo_api.py::test_demo3_interactive_approval_flow_over_http`、`test_run_manager.py` | Web Demo 3(真实人工审批 + SUPERSEDED);本地 Docker 已验 | ⏳ 待公网人工验收 |
+| MockLLM 公网运行 | `render.yaml`(`AEGIS_LLM_PROVIDER=mock`)+ `DemoRunManager` 每 run 新建 `MockLLM(script)` | `test_run_manager.py::test_isolation`(游标不共享)、离线全套 | 无 Key 演示;本地 Docker Demo Mode 已验 | ⏳ 待公网人工验收 |
+| Demo 工作区隔离 | `DemoRunManager`(`mkdtemp` under allowed_base + 终态清理 + `_sweep_orphaned_runs`) | `test_run_manager.py::test_isolation` / `test_cleanup` / 惰性清扫测试 | 本地 Docker 事件无 `/tmp` 路径泄漏 | ✅ 通过(本地) |
+| CLI/Web 一致性 | 场景执行器 `scenarios.py`(共享脚本 + 成功条件) | `tests/demo/test_cli_web_consistency.py`(id 映射 / 同脚本 / 同成功条件 / CLI 契约↔Web 验收同 run / `_CHECK_PY` pin) | `make demo` + WebUI 同源;无「前端成功而 make demo 失败」分叉 | ✅ 通过 |
+
+> 说明:七行中五行标「⏳ 待公网人工验收」——实现、自动测试与**本地 Docker Demo Mode 实测**均已通过(见 AGENT_LOG「Docker 验证」),仅缺合并后 Render 重部署 + 真实公网 URL 的人工点击证据(需 human partner 执行)。CLI/Web 一致性与工作区隔离已由自动测试 + 本地验证确证。
 
 ### 其他 SPEC 支柱(追加追溯)
 
@@ -62,4 +78,4 @@
 
 ## 总体验收
 
-本 worktree(`m8-hardening`)复跑:`make test` → **325 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个 task 全部 `✅ DONE` 且带 commit hash;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据;唯一非「已通过」项为 **WebUI 公网部署(deferred)**——本地 `aegiscode serve` 与 Docker 运行已实测通过,公网 URL 按既定决策暂不部署。
+当前 worktree(`webui-mock-demos`,追加任务 C)复跑:`make test` → **418 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个原始 task 全部 `✅ DONE` 且带 commit hash + 追加任务 A/B/C;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据。**WebUI 公网部署已完成**(追加任务 B,https://aegiscode-o20h.onrender.com);**WebUI 预设 MockLLM 演示**(追加任务 C)实现 + 自动测试 + 本地 Docker Demo Mode 实测均通过,唯余合并后 Render 重部署 + 公网三项 Demo 人工点击验收待执行(见上「WebUI 预设 MockLLM 演示」矩阵与 AGENT_LOG)。

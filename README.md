@@ -157,6 +157,27 @@ aegiscode serve --host 127.0.0.1 --port 8000
 
 极简单页面板:提交任务、查看任务状态/步骤事件流、查看并处理待审批(approve/reject)、查看凭据状态(仅掩码)。所有渲染走 `textContent`(XSS 安全)。REST API 端点见 `aegiscode/service/api.py`(任务 CRUD、事件、审批决策、取消、审计、凭据状态)。
 
+### 11.1 WebUI 预设演示(Demo Mode)
+
+在 Demo Mode(`AEGIS_DEMO_MODE=1`,公网实例默认开启)下,WebUI 首页会显示「预设机制演示」区,提供三张一键运行的卡片。**无需 API Key、无需输入任务** —— 访问公网地址即可直观体验 AegisCode 三大 Harness 机制:
+
+| Demo | 卡片标题 | 展示的 Harness 机制 |
+|---|---|---|
+| `dangerous-action-denial` | 危险命令拦截 | 治理引擎在工具执行前拒绝 `rm -rf /`;**工具执行次数为 0**,审计记录 DENY + rule_id,Agent 收到 POLICY_DENIED 反馈 |
+| `feedback-driven-repair` | 失败反馈驱动修复 | 首次实现测试真实失败 → 失败反馈进入下一轮上下文 → Agent 改变动作 → 复验通过,完成由验证器客观复跑判定 |
+| `approval-binding-invalidation` | 高风险操作审批 + 失效 | 高风险动作暂停等待**真实人工审批**;批准原动作后执行;参数改动后旧审批指纹失效(SUPERSEDED),被篡改的动作**不执行** |
+
+要点:
+
+- **真实机制,零伪造**:三个 Demo 全部真实经过 HarnessCore + MockLLM + 动作解析 + 工具分发 + 治理引擎 + 反馈回灌 + 审批状态机 + 审计哈希链。成功与否来自场景执行器对**真实审计事件流**的确定性断言(与 `make demo` 同一套 `success_conditions`),而非前端硬编码或 HTTP 200。任一失败绝不在前端伪装成功。
+- **无 Key、无网络、用 MockLLM**:不访问真实 LLM、不访问外部网络、不操作用户真实仓库。
+- **隔离的临时示例工作区**:每次运行有唯一 run ID + 独立临时工作区 + 独立 MockLLM 游标,运行结束后清理(并有惰性清扫兜底);页面刷新后可按 run ID 恢复查询。
+- **Demo 3 如何审批**:运行到高风险动作时状态变为「等待审批」,面板显示动作摘要与风险,点击「批准原动作」后场景继续;随后场景在指纹绑定后改动参数以演示旧审批失效(与 `make demo` demo3 完全同一 `validate_resume`/SUPERSEDED 机制)。
+- **安全边界**:用户只能选择后端白名单中的 Demo ID,不能提交自定义 MockLLM 脚本、任意路径、任意命令、工具白名单或治理策略;Demo 输出经脱敏,不展示密钥/绝对路径/异常堆栈。
+- **已知限制**:Render 免费实例休眠后临时数据丢失;Demo 3 需人工点击批准(未做自动播放);单页轮询(非 SSE)。
+
+**`make demo` 与 WebUI Demo 的关系**:两者复用同一份共享场景定义(`aegiscode/demo/scenarios.py`:相同 Demo ID、相同 MockLLM 脚本、相同成功条件)。`make demo` 是命令行评分入口;WebUI Demo 是其图形化、公网可访问的等价实现。一致性由 `tests/demo/test_cli_web_consistency.py` 守护——不存在「前端显示成功而 `make demo` 判定失败」的分叉。Demo API 端点:`GET /demos`(列表)、`POST /demos/{id}/run`(启动,返回 run_id)、`GET /demos/runs/{run_id}`(状态 + 验收);审批复用既有 `GET /tasks/{run_id}/approvals` + `POST /approvals/{id}/decision`。
+
 ## 12. 公网部署 URL
 
 **https://aegiscode-o20h.onrender.com**
@@ -194,6 +215,8 @@ GitHub main → GitHub Actions CI (make test + make demo + docker build)
 ```bash
 make deploy-check DEPLOY_URL=https://<your-render-url>
 ```
+
+非破坏性检查:`/healthz`、无敏感信息泄漏、WebUI 可访问;当 `/healthz` 报告 `mode=demo` 时,额外校验 `GET /demos` 列出三项预设演示(**不**运行完整 Demo 3,避免消耗时长/改动共享状态)。完整三项 Demo 仍需人工公网验收。
 
 ### 本地 Docker 运行（Demo Mode）
 

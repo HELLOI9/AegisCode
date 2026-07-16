@@ -555,3 +555,49 @@ WebUI: workspace 字段已禁用, value="demo"
 - 人工安全验收: **✅ 通过**（2026-07-15）
 - 实现 commit: `d4f5471` (main, squash merge of PR #11)
 - PR: [#11](https://github.com/HELLOI9/AegisCode/pull/11)（已合并）
+
+---
+
+## [2026-07-15] 追加任务 C：WebUI 预设 MockLLM 演示
+
+**PLAN task**：追加任务 C（完善 Task 28 WebUI + 追加任务 B Render 公网演示的图形化机制演示能力）。
+
+**缺失问题**：公网已部署，`make demo` 可在 MockLLM 下确定性演示三机制，但**部署后的 WebUI 未提供这三个 MockLLM 演示入口**。根因：Demo Mode 下 `assembly.build_llm(provider="mock")` 返回 `MockLLM([])`（空脚本），任何 `POST /tasks` 立即 `MockExhaustedError → LLM_ERROR`；三个 demo 的确定性场景逻辑锁死在 `demos/*.py::run()`，Web 层无法复用；无 Demo API、无共享场景层。
+
+**触发的 Superpowers Skill**：subagent-driven-development（控制器 + 每任务 subagent 实现 + 两阶段评审）、test-driven-development（每任务 RED→GREEN）、using-git-worktrees、requesting-code-review（终审）。
+
+**branch / worktree**：`worktree-webui-mock-demos` @ `.claude/worktrees/webui-mock-demos`（从 main tip `2f9f8f3` 分叉）。
+
+**对现有 make demo 的分析**：`make demo` → `python -m demos.run_demos`，顺序跑 demo1/2/3，各 `run()` 返回契约 dict，全 PASS 才 exit 0；三 demo 已真实经过 HarnessCore + MockLLM + 治理 + 审批 + 审计（无 theater），但各自硬编码脚本/工作区/断言，无共享场景层，Demo 3 用内部 `_LifecycleResolver` 自动批准而非真实审批 API。
+
+**场景共享设计**：抽取 `aegiscode/demo/scenarios.py` 为唯一真相源（`DemoScenario` 注册表：id/metadata/`mock_script`/`success_conditions`/执行 knobs + `RunOutcome` + `build_run_outcome` + `evaluate`）。三个 CLI demo 改为消费 `mock_script`（契约不变，literal-anchor assert 防漂移）。`aegiscode/demo/service.py::DemoRunManager` 每 run 建独立临时工作区 + 独立 `MockLLM(script)` + 真 HarnessCore，复用现有 `ApplicationService`（异步线程 + 审批 Event + 审计），`.service` 即 Web API 的 service。
+
+**TDD Red/Green**：每任务先写失败测试→看它失败→最小实现→通过。共新增 74 个测试（scenarios 38、cli-uses-registry 4、run_manager 8、demo_api 8、webui 5、consistency 5、serve-wiring 3、deploy_check 3）。`make test` 344→418 passed。
+
+**修改文件**：新增 `aegiscode/demo/{__init__,scenarios,service}.py`；改 `aegiscode/service/api.py`（Demo 端点 + 事件脱敏）、`aegiscode/service/webui/{index.html,app.js,style.css}`（预设演示面板）、`aegiscode/cli.py`（`build_serve_app` demo-aware 装配）、`scripts/deploy_check.py`（`check_demos_listed`）、`demos/demo1/2/3_*.py`（消费场景层）；新增 `tests/demo/*` + `tests/service/test_demo_api.py` + 扩展 `tests/service/test_webui_served.py` / `tests/test_deploy_check.py`。**未改** `.gitlab-ci.yml`、`.github/workflows/ci.yml`、`render.yaml`、`Dockerfile`、`make demo`/`make test` 语义、现有 MockLLM 机制测试。
+
+**WebUI 与 API 设计**：Demo 模式显示三卡片（标题/说明/学习目标/运行）；点击 → `POST /demos/{id}/run` → 轮询 `GET /demos/runs/{run_id}` + `GET /tasks/{run_id}/events`；展示状态标签（文字+图标，非仅颜色）+ 分步时间线 + 治理判定 + 工具执行状态 + 审批面板（仅待审批出现）+ 可折叠脱敏原始事件 + 验收摘要 + 重跑。验收判定来自 `acceptance.every(passed)`（== `make demo` 的 `success_conditions`），**非** HTTP 200 / 非终态。
+
+**安全边界**：用户只能选后端白名单 Demo ID；不能提交自定义脚本/路径/命令/工具白名单/治理策略；run 间不共享工作区与 MockLLM 游标；未知 id→400、未知 run→404；`POST /demos/{id}/run` 忽略请求体;输出脱敏、无密钥/绝对路径/堆栈;临时工作区终态清理 + 惰性清扫兜底。
+
+**reviewer 发现**：
+- Task 3（DemoRunManager，opus）：SPEC ✅；Important = get_run 未轮询到终态时临时工作区泄漏 → 修（`start_run` 惰性清扫），再审通过。
+- Task 4（Demo API，opus）：SPEC ✅ / Approved / 0 C·I（确认异步审批暂停真实、无 theater）。
+- Task 5（WebUI，sonnet）：Important = `renderAcceptance` 用终态 FAILED 门控 → demo1（`max_steps=1` DENY-only 天然 FAILED 但全 pass）被误显失败 → 修为按 `acceptance.every(passed)` 判定，再审通过。
+- 终审（whole-branch，opus）：✅ MERGE，0 Critical、1 Important（I-1：CLI 契约与 Web `success_conditions` 两套并行表达，仅测试桥接）+ 4 Minor。
+
+**人工修改（控制器直接实现）**：Task 4/5/6 因 subagent 连续 3 次 context 溢出，由控制器直接以 TDD 完成（RED 先验，`node --check` 校验 JS），并各自派独立 reviewer 审。I-1 + M-1 由控制器补测试关闭（新测试绑定 CLI 契约与 Web 验收到同一 run + pin `_CHECK_PY`，均经 mutation→RED 验证）。
+
+**本地测试**：`make test` → 418 passed；`make demo` → 3 passed/0 failed（exit 0）；`ruff check` 分支新增/改动文件 clean。
+
+**Docker 验证**：`docker build -t aegiscode:web-demo .` OK；以 render.yaml Demo Mode 环境启动容器，HTTP 实测：`/healthz` mode=demo、`/ui-config` demo_mode=true、`/demos` 列 3 项；Demo1 全验收 pass + 0 工具执行；Demo2 COMPLETED；Demo3 交互审批（真实 PENDING、审批前 0 执行、批准后原动作执行、改参 SUPERSEDED）全 pass；未知 id→400、未知 run→404；事件无 `/tmp` 路径/密钥泄漏；容器日志无未处理异常。
+
+**Render 部署 / 公网三项 Demo 验收**：**待人工执行**（合并 PR → Render 按 checksPass 自动重部署 → 用真实公网 URL 点击三项 Demo + `make deploy-check`）。
+
+**commit 和 PR**：分支 `worktree-webui-mock-demos`，10 个 commit（`6bc4d86`→`1b82575`）。PR：**待创建**。
+
+**经验与限制**：
+- MockLLM 游标绝不跨 run 共享——每 run 新建 `MockLLM(script)`（否则并发/重跑串扰）。
+- Demo 成功必须由场景 `success_conditions` 对真实审计流断言判定，**绝不**用 harness 终态：DENY-only 演示天然以 MAX_STEPS→FAILED 终止却全 pass。
+- Demo 3 Web 失效演示复用 `make demo` 同一 `validate_resume`/SUPERSEDED 机制（轮1真人批准、轮2 场景在指纹绑定后改参）——未造 demo 专用伪审批。
+- 已知限制：Render 免费实例休眠丢临时数据；Demo 3 需人工点击（未做自动播放）；单页轮询非 SSE；`chain.py` 预存 `str(EventType)` bug（本分支范围外，读路径归一化）。

@@ -2884,6 +2884,28 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 - **`make deploy-check` 公网结果**：All checks passed（/healthz=200, no secrets, WebUI OK）
 - **人工验收**：✅ 通过（2026-07-15）
 
+### 追加任务 C：WebUI 预设 MockLLM 演示（分支 `worktree-webui-mock-demos`）
+
+- **补充原因**：追加任务 B 已完成 Render 公网部署 + Demo Mode + WebUI 可访问，但**部署后的 WebUI 未提供 `make demo` 三项 MockLLM 演示的图形化入口**。原 Task 28（WebUI）只要求「单页 + 事件流 + 审批面板」，追加任务 B 只要求「公网 URL + Demo Mode」，**均未要求图形化机制演示**。本任务在原 task 下如实新增「验收完善项」，为满足公网演示完整性而补充——不伪造本功能早已完成。
+- **此前缺失**：Demo Mode 下 `build_llm(provider="mock")` 返回 `MockLLM([])`（空脚本），任何 `POST /tasks` 立即 LLM_ERROR；三 demo 场景逻辑锁死在 `demos/*.py`，无共享场景层、无 Demo API、WebUI 无演示入口。
+- **恢复执行日期**：2026-07-15
+- **本次完善内容**：
+  - 新增共享场景层 `aegiscode/demo/scenarios.py`（`DemoScenario` 注册表 + `RunOutcome` + `build_run_outcome` + `evaluate`，唯一真相源）
+  - 三个 CLI demo（`demos/demo1/2/3_*.py`）改为消费共享 `mock_script`（`run()` 契约不变，literal-anchor 防漂移）
+  - 新增场景执行器 `aegiscode/demo/service.py::DemoRunManager`（每 run 独立临时工作区 + 独立 MockLLM + 真 HarnessCore，复用 `ApplicationService`）
+  - 新增 Demo API（`aegiscode/service/api.py`：`GET /demos`、`POST /demos/{id}/run`、`GET /demos/runs/{id}`；审批复用既有 `/approvals/{id}/decision`）
+  - 新增 WebUI 预设演示面板（`aegiscode/service/webui/{index.html,app.js,style.css}`：三卡片 + 时间线 + 治理标签 + 审批面板 + 验收摘要 + 重跑；验收判定源自 `success_conditions`，非 HTTP 200）
+  - demo-aware serve 装配（`aegiscode/cli.py::build_serve_app`）
+  - `scripts/deploy_check.py` 新增非破坏性 `check_demos_listed`（demo 模式门控，不跑完整 Demo 3）
+- **新增测试**：74 个（scenarios 38 / cli-uses-registry 4 / run_manager 8 / demo_api 8 / webui 5 / cli-web-consistency 5 / serve-wiring 3 / deploy_check 3）；`make test` 344→**418 passed**。CLI/Web 一致性测试确保无「前端成功而 `make demo` 失败」分叉。
+- **TDD**：每任务 RED→GREEN；I-1/M-1 修复测试经 mutation→RED 验证。
+- **验证结果**：`make test` → 418 passed；`make demo` → 3 passed/0 failed；`docker build -t aegiscode:web-demo .` OK；本地 Docker Demo Mode 容器 HTTP 实测三项 Demo 全通过（Demo1 0 执行全验收、Demo2 COMPLETED、Demo3 真实人工审批 + SUPERSEDED），无路径/密钥泄漏、无未处理异常、400/404 正确。
+- **评审**：每任务两阶段评审 + whole-branch 终审（opus）= ✅ MERGE，0 Critical、1 Important（I-1，已闭环）+ 4 Minor（M-1 已闭环；M-2/M-4 预存/范围外；M-3 安全降级）。
+- **实现 commit**：分支 `worktree-webui-mock-demos` 10 commit（`6bc4d86`→`1b82575`）
+- **PR**：待创建
+- **Render deploy**：待人工执行（合并 → checksPass 自动重部署）
+- **公网人工验收结果**：⏳ 待执行（真实公网 URL 点击三项 Demo + `make deploy-check`）
+
 ---
 
 ## Task Dependency Summary
