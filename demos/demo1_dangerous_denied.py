@@ -49,6 +49,12 @@ _TASK_ID = "demo1"
 # registry (single source of truth shared with the WebUI consumer) so the CLI
 # and Web demos can never silently diverge.
 _SCRIPT = list(get_scenario("dangerous-action-denial").mock_script)
+# Literal anchor (mirrors demo2/demo3): pins the exact dangerous action this
+# demo drives, so a registry edit that changed demo①'s script away from the
+# `rm -rf /` DENY case fails loudly here instead of silently mutating the demo.
+assert _SCRIPT == [
+    '{"tool": "run_command", "arguments": {"command": "rm -rf /"}}'
+], _SCRIPT
 
 
 class _SpyCommandTool:

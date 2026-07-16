@@ -341,13 +341,22 @@ class DemoRunManager:
     def _fallback_harness(self, task_id, workspace, cancel_check, audit_conn):
         """Keyless harness for a workspace this manager never registered.
 
-        Reached when create_task runs on a workspace that did NOT come through
-        ``start_run`` (e.g. a manual POST /tasks in demo mode, whose ephemeral
-        demo workspace this manager doesn't know). Using an empty ``MockLLM``
-        makes the run terminate as LLM_ERROR on the first turn instead of
-        raising ``KeyError`` here — which, on the async run thread, would leave
-        the task stuck RUNNING. Demo runs never hit this path: ``start_run``
-        always registers the workspace first.
+        Defense-in-depth: ``create_task`` can only reach the run thread for a
+        workspace inside ``allowed_base`` (``_validate_workspace`` rejects the
+        rest up front), but such a workspace need not have come through
+        ``start_run`` (e.g. a direct ``create_task`` on an allowed-but-
+        unregistered path). For those, using an empty ``MockLLM`` makes the run
+        terminate as LLM_ERROR on the first turn instead of raising ``KeyError``
+        here — which, on the async run thread, would leave the task stuck
+        RUNNING. Real demo runs never hit this path: ``start_run`` always
+        registers the workspace first. (Note: the WebUI's own ``POST /tasks``
+        in demo mode is blocked even earlier — ``validate_demo_request`` only
+        accepts the ``"demo"`` sentinel, and the ephemeral copy it makes lands
+        outside ``allowed_base`` → ``WorkspaceNotAllowedError`` before any
+        thread starts — so this fallback is a safety net, not that path.)
+
+        The fallback still runs through the REAL governance dispatcher (no
+        policy bypass); it is keyless only in LLM script, never in policy.
         """
         config = AegisConfig(
             workspace=Workspace(root=workspace, allowed_base=self._allowed_base)
