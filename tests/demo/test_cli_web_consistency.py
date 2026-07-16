@@ -53,6 +53,58 @@ def test_cli_and_web_use_the_same_mock_scripts():
         )
 
 
+def test_cli_and_web_use_the_same_check_program():
+    """demo2's on-disk verifier (`check.py`, `_CHECK_PY`) is duplicated in the CLI
+    demo and the Web runner (the dependency direction forbids aegiscode/ importing
+    from demos/). Pin them byte-for-byte so the Web demo2 can never silently get a
+    different final-verifier program than `make demo`'s demo2 (review finding M-1).
+    """
+    from aegiscode.demo import service as demo_service
+
+    assert demo2_feedback_loop._CHECK_PY == demo_service._CHECK_PY, (
+        "demo2 CLI _CHECK_PY diverged from the Web runner's copy"
+    )
+
+
+def test_cli_contract_and_web_acceptance_agree_per_scenario(tmp_path):
+    """Bind BOTH success expressions to the same execution (review finding I-1).
+
+    `make demo` judges success via each demo's own contract dict (demos/run_demos
+    checks); the WebUI judges success via scenarios.success_conditions evaluated
+    over the audit stream. These are two parallel expressions of "passed". This
+    test runs, for each scenario, BOTH the CLI demo's run() (asserting every
+    run_demos check passes) AND the Web DemoRunManager path (asserting every
+    acceptance condition passes) — so a change that made one path judge a run
+    "passed" while the other would not is caught here, not silently shipped.
+    """
+    from aegiscode.demo.service import DemoRunManager
+    from demos.run_demos import _DEMO_BY_NAME
+
+    # 1) CLI side: each demo's run() contract dict must satisfy every run_demos check.
+    for cli_name, scenario_id in _CLI_NAME_TO_SCENARIO_ID.items():
+        spec = _DEMO_BY_NAME[cli_name]
+        result = spec.run()
+        for label, predicate in spec.checks:
+            assert predicate(result), (
+                f"CLI demo {cli_name} contract check failed: {label!r} on {result!r}"
+            )
+
+    # 2) Web side: the SAME scenarios, run through the Web evaluator, must be
+    #    all-pass — so neither success expression accepts what the other rejects.
+    mgr = DemoRunManager(
+        allowed_base=str(tmp_path),
+        db_path=str(tmp_path / "agree.db"),
+        sync=True,
+        sync_decision_fn=lambda _approval_id: True,
+    )
+    for scenario_id in REGISTRY:
+        run = mgr.get_run(mgr.start_run(scenario_id))
+        assert run["done"] is True
+        assert all(c["passed"] for c in run["acceptance"]), (
+            f"Web acceptance disagreed with CLI success for {scenario_id}: {run['acceptance']}"
+        )
+
+
 def test_cli_and_web_share_success_conditions(tmp_path):
     """The SAME success_conditions that gate the WebUI verdict also gate make
     demo. Running each scenario through the Web DemoRunManager (sync) must yield
