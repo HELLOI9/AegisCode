@@ -572,7 +572,7 @@ WebUI: workspace 字段已禁用, value="demo"
 
 **场景共享设计**：抽取 `aegiscode/demo/scenarios.py` 为唯一真相源（`DemoScenario` 注册表：id/metadata/`mock_script`/`success_conditions`/执行 knobs + `RunOutcome` + `build_run_outcome` + `evaluate`）。三个 CLI demo 改为消费 `mock_script`（契约不变，literal-anchor assert 防漂移）。`aegiscode/demo/service.py::DemoRunManager` 每 run 建独立临时工作区 + 独立 `MockLLM(script)` + 真 HarnessCore，复用现有 `ApplicationService`（异步线程 + 审批 Event + 审计），`.service` 即 Web API 的 service。
 
-**TDD Red/Green**：每任务先写失败测试→看它失败→最小实现→通过。共新增 74 个测试（scenarios 38、cli-uses-registry 4、run_manager 8、demo_api 8、webui 5、consistency 5、serve-wiring 3、deploy_check 3）。`make test` 344→418 passed。
+**TDD Red/Green**：每任务先写失败测试→看它失败→最小实现→通过。共新增 74 个测试（scenarios 38、cli-uses-registry 4、run_manager 8、demo_api 8、webui 5、consistency 5、serve-wiring 3、deploy_check 3）。`make test` 344→419 passed(webui 选择器改造后 +1)。
 
 **修改文件**：新增 `aegiscode/demo/{__init__,scenarios,service}.py`；改 `aegiscode/service/api.py`（Demo 端点 + 事件脱敏）、`aegiscode/service/webui/{index.html,app.js,style.css}`（预设演示面板）、`aegiscode/cli.py`（`build_serve_app` demo-aware 装配）、`scripts/deploy_check.py`（`check_demos_listed`）、`demos/demo1/2/3_*.py`（消费场景层）；新增 `tests/demo/*` + `tests/service/test_demo_api.py` + 扩展 `tests/service/test_webui_served.py` / `tests/test_deploy_check.py`。**未改** `.gitlab-ci.yml`、`.github/workflows/ci.yml`、`render.yaml`、`Dockerfile`、`make demo`/`make test` 语义、现有 MockLLM 机制测试。
 
@@ -588,13 +588,13 @@ WebUI: workspace 字段已禁用, value="demo"
 
 **人工修改（控制器直接实现）**：Task 4/5/6 因 subagent 连续 3 次 context 溢出，由控制器直接以 TDD 完成（RED 先验，`node --check` 校验 JS），并各自派独立 reviewer 审。I-1 + M-1 由控制器补测试关闭（新测试绑定 CLI 契约与 Web 验收到同一 run + pin `_CHECK_PY`，均经 mutation→RED 验证）。
 
-**本地测试**：`make test` → 418 passed；`make demo` → 3 passed/0 failed（exit 0）；`ruff check` 分支新增/改动文件 clean。
+**本地测试**：`make test` → 419 passed；`make demo` → 3 passed/0 failed（exit 0）；`ruff check` 分支新增/改动文件 clean。
 
 **Docker 验证**：`docker build -t aegiscode:web-demo .` OK；以 render.yaml Demo Mode 环境启动容器，HTTP 实测：`/healthz` mode=demo、`/ui-config` demo_mode=true、`/demos` 列 3 项；Demo1 全验收 pass + 0 工具执行；Demo2 COMPLETED；Demo3 交互审批（真实 PENDING、审批前 0 执行、批准后原动作执行、改参 SUPERSEDED）全 pass；未知 id→400、未知 run→404；事件无 `/tmp` 路径/密钥泄漏；容器日志无未处理异常。
 
-**Render 部署 / 公网三项 Demo 验收**：**待人工执行**（合并 PR → Render 按 checksPass 自动重部署 → 用真实公网 URL 点击三项 Demo + `make deploy-check`）。
+**Render 部署 / 公网三项 Demo 验收**：✅ **完成（2026-07-16）**。PR #12 squash-merge → main `fb7029f` → Render 重部署 https://aegiscode-o20h.onrender.com。公网核验:`/healthz` mode=demo、`/ui-config` demo_mode=true、`/demos`=200,部署的 `app.js`/`index.html` 含选择器逻辑与 demo1/2/3 选项。**公网人工验收通过,未发现问题。**(过程小插曲:用户初次反馈「Workspace 不能下拉」——排查为①PR 未合并时公网仍是旧 main、②合并后浏览器缓存旧 app.js;强刷/无痕后正常。另按用户反馈将入口从三卡片改为 §十六 Workspace-path 下拉选择器 + 选中自动填充 task description,commit `a8eac20`,并用 Playwright 真浏览器验证 demo1 自动填充+Start+✓成功、demo3 选择+Start+等待审批+批准+SUPERSEDED+✓成功。)
 
-**commit 和 PR**：分支 `worktree-webui-mock-demos`，11 个 commit（`6bc4d86`→`daa4d8e`）。PR：[#12](https://github.com/HELLOI9/AegisCode/pull/12)。
+**commit 和 PR**：分支 `worktree-webui-mock-demos`,`6bc4d86`→`cdec3fd`（含选择器改造 `a8eac20`）。PR：[#12](https://github.com/HELLOI9/AegisCode/pull/12)（已合并,squash → main `fb7029f`）。
 
 **经验与限制**：
 - MockLLM 游标绝不跨 run 共享——每 run 新建 `MockLLM(script)`（否则并发/重跑串扰）。
