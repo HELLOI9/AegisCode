@@ -245,7 +245,6 @@
   const DEMO_POLL_MS = 1200;
   let demoRunId = null;
   let demoPollTimer = null;
-  let demoLastEventId = 0;
   let currentDemoId = null;
 
   const demosSection = $("demos-section");
@@ -295,7 +294,6 @@
     // Disable every card's Run button while a demo is in flight (avoid double-fire).
     demosList.querySelectorAll("button.demo-run-btn").forEach((b) => (b.disabled = true));
     currentDemoId = demoId;
-    demoLastEventId = 0;
     demoRun.classList.remove("hidden");
     demoRun.innerHTML = "";
     demoRun.appendChild(el("div", "demo-run-title", title));
@@ -443,13 +441,17 @@
       box.appendChild(row);
     });
     if (!done) return;
-    // Overall verdict derives from the per-condition results + terminal state —
-    // a failure can NEVER be laundered into success. All conditions must pass
-    // AND the run must not be FAILED/CANCELLED.
+    // Success is defined by the scenario's acceptance conditions — the SAME
+    // success_conditions `make demo` asserts — never by the harness terminal
+    // state. dangerous-action-denial deliberately ends via MAX_STEPS (a
+    // non-COMPLETED terminal state) on a fully-passing DENY-only run
+    // (max_steps=1), so gating on that terminal state would render a correct
+    // run as a failure. A failure still can NEVER be laundered into success:
+    // the banner is green ONLY when every acceptance condition passed. A
+    // user-initiated CANCELLED (with unmet conditions) is surfaced distinctly.
     const upState = (state || "").toUpperCase();
     const allPass = acceptance.length > 0 && acceptance.every((c) => c.passed === true);
-    const badState = upState === "FAILED" || upState === "CANCELLED";
-    if (allPass && !badState) {
+    if (allPass) {
       setDemoStatus("成功", "ok", "演示成功 · all acceptance conditions passed");
     } else if (upState === "CANCELLED") {
       setDemoStatus("已取消", "cancel", "已取消 · cancelled");

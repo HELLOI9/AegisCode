@@ -135,13 +135,36 @@ def test_app_js_demo_failure_not_shown_as_success(tmp_path):
     assert ".every(" in body or ".some(" in body
 
 
+def test_app_js_demo1_success_not_gated_by_failed_state(tmp_path):
+    """`dangerous-action-denial` ends state=FAILED BY DESIGN (max_steps=1,
+    DENY-only → MAX_STEPS → non-COMPLETED → "FAILED"), yet all its acceptance
+    conditions pass. The WebUI verdict must derive from the scenario's acceptance
+    conditions (the same success_conditions `make demo` uses), NOT the harness
+    terminal state — otherwise the flagship demo's fully-passing run renders as a
+    red failure. Guard: renderAcceptance must not gate its success verdict on a
+    FAILED terminal state."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    assert "function renderAcceptance" in body
+    region = body.split("function renderAcceptance", 1)[1]
+    region = region.split("\n  function ", 1)[0]  # scope to renderAcceptance body
+    assert "FAILED" not in region, (
+        "renderAcceptance must not treat a FAILED terminal state as an automatic "
+        "failure — success is defined by acceptance.every(passed)"
+    )
+    assert ".every(" in region
+
+
 def test_style_has_demo_classes(tmp_path):
     """style.css must define the demo card/timeline/acceptance classes, and
     status must NOT be conveyed by color alone (a text/icon class must exist)."""
     client = make_api_client(tmp_path, scripted=[], final_ok=True)
     css = client.get("/style.css").text
     assert ".demo-card" in css
-    assert ".timeline" in css or ".step-row" in css
-    assert ".acceptance" in css
+    # Classes actually applied by app.js (no dead selectors).
+    assert ".demo-timeline" in css
+    assert ".step-row" in css
+    assert ".demo-acceptance" in css
+    assert ".acc-row" in css
     # Accessibility: a glyph/icon class so status is text+icon, not color-only.
-    assert ".status-icon" in css or "::before" in css
+    assert ".status-icon" in css

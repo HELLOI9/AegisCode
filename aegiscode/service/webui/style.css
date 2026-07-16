@@ -180,7 +180,7 @@ button.approve { background: var(--ok); }
 .demo-status.cancel { border-color: var(--warn); color: var(--warn); }
 .demo-status.prep { border-color: var(--border); color: var(--muted); }
 
-.timeline, .demo-timeline { display: flex; flex-direction: column; gap: 4px; }
+.demo-timeline { display: flex; flex-direction: column; gap: 4px; }
 .step-row {
   display: flex;
   flex-wrap: wrap;
@@ -199,7 +199,7 @@ button.approve { background: var(--ok); }
   color: var(--muted);
 }
 
-.acceptance, .demo-acceptance { display: flex; flex-direction: column; gap: 4px; }
+.demo-acceptance { display: flex; flex-direction: column; gap: 4px; }
 .acc-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .acc-row.acc-pass { color: var(--ok); }
 .acc-row.acc-fail { color: var(--bad); }
