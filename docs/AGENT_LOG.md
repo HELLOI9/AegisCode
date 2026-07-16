@@ -594,7 +594,7 @@ WebUI: workspace 字段已禁用, value="demo"
 
 **Render 部署 / 公网三项 Demo 验收**：**待人工执行**（合并 PR → Render 按 checksPass 自动重部署 → 用真实公网 URL 点击三项 Demo + `make deploy-check`）。
 
-**commit 和 PR**：分支 `worktree-webui-mock-demos`，10 个 commit（`6bc4d86`→`1b82575`）。PR：**待创建**。
+**commit 和 PR**：分支 `worktree-webui-mock-demos`，11 个 commit（`6bc4d86`→`daa4d8e`）。PR：[#12](https://github.com/HELLOI9/AegisCode/pull/12)。
 
 **经验与限制**：
 - MockLLM 游标绝不跨 run 共享——每 run 新建 `MockLLM(script)`（否则并发/重跑串扰）。

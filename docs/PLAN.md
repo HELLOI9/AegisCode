@@ -2902,7 +2902,7 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 - **验证结果**：`make test` → 418 passed；`make demo` → 3 passed/0 failed；`docker build -t aegiscode:web-demo .` OK；本地 Docker Demo Mode 容器 HTTP 实测三项 Demo 全通过（Demo1 0 执行全验收、Demo2 COMPLETED、Demo3 真实人工审批 + SUPERSEDED），无路径/密钥泄漏、无未处理异常、400/404 正确。
 - **评审**：每任务两阶段评审 + whole-branch 终审（opus）= ✅ MERGE，0 Critical、1 Important（I-1，已闭环）+ 4 Minor（M-1 已闭环；M-2/M-4 预存/范围外；M-3 安全降级）。
 - **实现 commit**：分支 `worktree-webui-mock-demos` 10 commit（`6bc4d86`→`1b82575`）
-- **PR**：待创建
+- **PR**：[#12](https://github.com/HELLOI9/AegisCode/pull/12)
 - **Render deploy**：待人工执行（合并 → checksPass 自动重部署）
 - **公网人工验收结果**：⏳ 待执行（真实公网 URL 点击三项 Demo + `make deploy-check`）
 
