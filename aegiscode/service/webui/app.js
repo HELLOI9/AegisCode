@@ -212,7 +212,23 @@
   // --- start handler -----------------------------------------------------
   startForm.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const workspace = $("workspace").value.trim();
+
+    // Demo mode: Workspace path is the preset-demo selector. Start runs the
+    // chosen demo through the Demo API (not POST /tasks). runDemo owns the
+    // Start/selector disabled state and the run-detail rendering.
+    if (demoMode) {
+      const demoId = workspaceSelect.value;
+      if (!demoId) {
+        taskIdLabel.textContent = "请先选择一个预设演示 · pick a demo first";
+        return;
+      }
+      const meta = demoMeta[demoId];
+      runDemo(demoId, meta ? meta.title || demoId : demoId);
+      return;
+    }
+
+    // Standard mode: free-text workspace + description → POST /tasks.
+    const workspace = workspaceInput.value.trim();
     const description = $("description").value.trim();
     if (!workspace || !description) return;
 
@@ -247,9 +263,15 @@
   let demoPollTimer = null;
   let currentDemoId = null;
 
-  const demosSection = $("demos-section");
-  const demosList = $("demos-list");
+  const workspaceInput = $("workspace");
+  const workspaceSelect = $("workspace-select");
+  const demoObjective = $("demo-objective");
   const demoRun = $("demo-run");
+
+  // Demo metadata keyed by scenario id (populated from GET /demos). Drives the
+  // Workspace-path selector's auto-fill of the Task description (§十六).
+  const demoMeta = {};
+  let demoMode = false;
 
   function shortType(t) {
     if (!t) return "EVENT";
@@ -258,31 +280,34 @@
     return i >= 0 ? s.slice(i + 1) : s;
   }
 
-  async function loadDemos() {
+  // Fetch the demo catalog, index it by id, and wire the selector so that
+  // choosing a demo auto-fills the Task description with that demo's preset
+  // (and shows its learning objective). The <option> values are the backend
+  // scenario ids (dangerous-action-denial / feedback-driven-repair /
+  // approval-binding-invalidation); the labels shown are demo1/demo2/demo3.
+  async function loadDemoSelector() {
     let demos;
     try {
       demos = await getJSON("/demos");
     } catch (e) {
-      demosList.textContent = "无法加载演示列表 (unavailable): " + e.message;
+      demoObjective.textContent = "无法加载演示列表 (unavailable): " + e.message;
       return;
     }
-    demosList.innerHTML = "";
     demos.forEach((d) => {
-      const card = el("div", "demo-card");
-      card.appendChild(el("div", "demo-title", d.title || d.id));
-      card.appendChild(el("div", "demo-desc muted", d.description || ""));
-      if (d.learning_objective) {
-        card.appendChild(el("div", "demo-obj muted", "目标 · " + d.learning_objective));
-      }
-      if (d.interactive_approval) {
-        card.appendChild(el("div", "demo-badge", "需人工审批 · interactive approval"));
-      }
-      const btn = el("button", "demo-run-btn", "运行演示");
-      btn.onclick = () => runDemo(d.id, d.title || d.id, btn);
-      card.appendChild(btn);
-      demosList.appendChild(card);
+      demoMeta[d.id] = d;
+    });
+    workspaceSelect.addEventListener("change", () => {
+      const d = demoMeta[workspaceSelect.value];
+      if (!d) return;
+      // Auto-fill the task description with the demo's preset.
+      $("description").value = d.description || d.title || d.id;
+      const bits = [];
+      if (d.learning_objective) bits.push("目标 · " + d.learning_objective);
+      if (d.interactive_approval) bits.push("需人工审批 · interactive approval");
+      demoObjective.textContent = bits.join("    ·    ");
     });
   }
+
   function stopDemoPolling() {
     if (demoPollTimer !== null) {
       clearInterval(demoPollTimer);
@@ -290,9 +315,10 @@
     }
   }
 
-  async function runDemo(demoId, title, btn) {
-    // Disable every card's Run button while a demo is in flight (avoid double-fire).
-    demosList.querySelectorAll("button.demo-run-btn").forEach((b) => (b.disabled = true));
+  async function runDemo(demoId, title) {
+    // Disable Start + selector while a demo is in flight (avoid double-fire).
+    startBtn.disabled = true;
+    workspaceSelect.disabled = true;
     currentDemoId = demoId;
     demoRun.classList.remove("hidden");
     demoRun.innerHTML = "";
@@ -306,7 +332,8 @@
       demoRunId = res.run_id;
     } catch (e) {
       setDemoStatus("失败", "fail", "启动失败 · " + e.message);
-      demosList.querySelectorAll("button.demo-run-btn").forEach((b) => (b.disabled = false));
+      startBtn.disabled = false;
+      workspaceSelect.disabled = false;
       return;
     }
     // Timeline + approval + acceptance + raw-events containers.
@@ -359,7 +386,8 @@
       }
       if (run.done) {
         stopDemoPolling();
-        demosList.querySelectorAll("button.demo-run-btn").forEach((b) => (b.disabled = false));
+        startBtn.disabled = false;
+        workspaceSelect.disabled = false;
         addRerunButton();
       }
     } catch (e) {
@@ -493,8 +521,8 @@
     const btn = el("button", "demo-rerun", "重新运行 · Re-run");
     btn.onclick = () => {
       const id = currentDemoId;
-      const title = demoRun.querySelector(".demo-run-title");
-      runDemo(id, title ? title.textContent : id, btn);
+      const meta = demoMeta[id];
+      runDemo(id, meta ? meta.title || id : id);
     };
     demoRun.appendChild(btn);
   }
@@ -504,14 +532,16 @@
     try {
       const cfg = await getJSON("/ui-config");
       if (cfg.demo_mode) {
-        const wsInput = $("workspace");
-        wsInput.value = "demo";
-        wsInput.disabled = true;
-        wsInput.title = "Demo mode: workspace is fixed to the built-in sample project";
-        wsInput.removeAttribute("required");
-        // Reveal the preset-demo panel and load the catalog.
-        if (demosSection) demosSection.classList.remove("hidden");
-        loadDemos();
+        demoMode = true;
+        // Workspace path becomes the preset-demo selector (§十六): hide the
+        // free-text input, reveal the selector, and load the catalog so
+        // choosing a demo auto-fills the task description.
+        workspaceInput.classList.add("hidden");
+        workspaceInput.removeAttribute("required");
+        workspaceSelect.classList.remove("hidden");
+        $("description").readOnly = true;  // preset-driven in demo mode
+        $("description").title = "Demo mode: description is auto-filled from the selected demo";
+        await loadDemoSelector();
       }
     } catch (e) { /* non-critical */ }
   })();

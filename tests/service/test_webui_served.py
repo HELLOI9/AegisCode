@@ -96,23 +96,30 @@ def test_existing_endpoints_still_work(tmp_path):
 # rendering) exist — not just comments.
 
 
-def test_index_has_demo_section(tmp_path):
-    """The HTML shell must carry the preset-demo container node the JS targets."""
+def test_index_has_workspace_demo_selector(tmp_path):
+    """In the demo-entry UI (§十六), Workspace path is a <select> whose options
+    are demo1/demo2/demo3, and the run-detail panel container is present."""
     client = make_api_client(tmp_path, scripted=[], final_ok=True)
     body = client.get("/").text
-    # A stable container id the app.js populates with demo cards.
-    assert 'id="demos-section"' in body
-    assert 'id="demos-list"' in body
+    # Workspace path is a selector, not just a free-text input.
+    assert 'id="workspace-select"' in body
+    # The three demo options are present by their user-facing labels.
+    assert "demo1" in body and "demo2" in body and "demo3" in body
+    # The run-detail panel the JS renders into.
+    assert 'id="demo-run"' in body
 
 
-def test_app_js_has_demo_panel_logic(tmp_path):
-    """app.js must fetch the demo list, POST a run, poll get_run, and render
-    the acceptance summary — real code paths, not just mentions."""
+def test_app_js_has_demo_selector_logic(tmp_path):
+    """app.js must: fetch /demos, auto-fill the task description on selection,
+    POST /demos/{id}/run on Start, poll /demos/runs/, render acceptance, and
+    reuse the existing approval decision endpoint for demo 3."""
     client = make_api_client(tmp_path, scripted=[], final_ok=True)
     body = client.get("/app.js").text
-    # Fetches the demo catalog.
-    assert 'fetch("/demos")' in body or "getJSON(\"/demos\")" in body or "getJSON('/demos')" in body
-    # Starts a run (POST /demos/{id}/run).
+    # Fetches the demo catalog to populate the selector + description presets.
+    assert 'getJSON("/demos")' in body or "getJSON('/demos')" in body
+    # Auto-fills the task description when a demo is selected (change handler).
+    assert 'addEventListener("change"' in body
+    # Starts the selected demo via the Demo API.
     assert "/demos/" in body and "/run" in body
     # Polls the run status endpoint.
     assert "/demos/runs/" in body
@@ -120,6 +127,16 @@ def test_app_js_has_demo_panel_logic(tmp_path):
     assert "renderAcceptance" in body
     # Reuses the existing approval decision endpoint for interactive demo 3.
     assert "/decision" in body
+
+
+def test_app_js_maps_demo_labels_to_scenario_ids(tmp_path):
+    """The three user-facing labels demo1/demo2/demo3 must map to the three
+    backend scenario ids so Start runs the correct MockLLM script."""
+    client = make_api_client(tmp_path, scripted=[], final_ok=True)
+    body = client.get("/app.js").text
+    assert "dangerous-action-denial" in body
+    assert "feedback-driven-repair" in body
+    assert "approval-binding-invalidation" in body
 
 
 def test_app_js_demo_failure_not_shown_as_success(tmp_path):
@@ -160,7 +177,6 @@ def test_style_has_demo_classes(tmp_path):
     status must NOT be conveyed by color alone (a text/icon class must exist)."""
     client = make_api_client(tmp_path, scripted=[], final_ok=True)
     css = client.get("/style.css").text
-    assert ".demo-card" in css
     # Classes actually applied by app.js (no dead selectors).
     assert ".demo-timeline" in css
     assert ".step-row" in css

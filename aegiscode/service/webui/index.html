@@ -13,27 +13,30 @@
   </header>
 
   <main>
-    <section id="demos-section" class="card hidden">
-      <h2>预设机制演示 · Preset mechanism demos</h2>
-      <p class="muted">
-        无需 API Key、无需输入任务 —— 一键运行,直观体验 AegisCode 的三大 Harness 机制(MockLLM 驱动,零网络)。
-      </p>
-      <div id="demos-list" class="demos-list"></div>
-      <div id="demo-run" class="demo-run hidden"></div>
-    </section>
-
     <section id="start-section" class="card">
       <h2>Start a task</h2>
       <form id="start-form" autocomplete="off">
         <label for="workspace">Workspace path</label>
+        <!-- Standard mode: free-text workspace path. -->
         <input id="workspace" name="workspace" type="text" placeholder="/path/to/workspace" required />
+        <!-- Demo mode (§十六): Workspace path is a selector of the preset demos.
+             app.js reveals this, hides the text input, and auto-fills the task
+             description from the chosen demo. -->
+        <select id="workspace-select" class="hidden" aria-label="Workspace path (preset demo)">
+          <option value="" disabled selected>选择预设演示 · choose a preset demo…</option>
+          <option value="dangerous-action-denial">demo1 · 危险命令拦截</option>
+          <option value="feedback-driven-repair">demo2 · 失败反馈驱动修复</option>
+          <option value="approval-binding-invalidation">demo3 · 高风险操作审批 + 失效</option>
+        </select>
 
         <label for="description">Task description</label>
         <textarea id="description" name="description" rows="3" placeholder="Describe the task…" required></textarea>
+        <div id="demo-objective" class="muted"></div>
 
         <button id="start-btn" type="submit">Start</button>
         <span id="task-id-label" class="muted"></span>
       </form>
+      <div id="demo-run" class="demo-run hidden"></div>
     </section>
 
     <section id="state-section" class="card hidden">
