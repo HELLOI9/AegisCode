@@ -159,19 +159,20 @@ aegiscode serve --host 127.0.0.1 --port 8000
 
 ### 11.1 WebUI 预设演示(Demo Mode)
 
-在 Demo Mode(`AEGIS_DEMO_MODE=1`,公网实例默认开启)下,WebUI 首页会显示「预设机制演示」区,提供三张一键运行的卡片。**无需 API Key、无需输入任务** —— 访问公网地址即可直观体验 AegisCode 三大 Harness 机制:
+在 Demo Mode(`AEGIS_DEMO_MODE=1`,公网实例默认开启)下,首页「Start a task」的 **Workspace path 变成预设演示下拉框**(demo1 / demo2 / demo3)。**无需 API Key、无需自己输入任务** —— 选择一个 demo 会**自动填充 Task description**(对应该 demo 的预设),点击 **Start** 即运行该场景并展示运行详情。访问公网地址即可直观体验 AegisCode 三大 Harness 机制:
 
-| Demo | 卡片标题 | 展示的 Harness 机制 |
+| 下拉项 | scenario id | 展示的 Harness 机制 |
 |---|---|---|
-| `dangerous-action-denial` | 危险命令拦截 | 治理引擎在工具执行前拒绝 `rm -rf /`;**工具执行次数为 0**,审计记录 DENY + rule_id,Agent 收到 POLICY_DENIED 反馈 |
-| `feedback-driven-repair` | 失败反馈驱动修复 | 首次实现测试真实失败 → 失败反馈进入下一轮上下文 → Agent 改变动作 → 复验通过,完成由验证器客观复跑判定 |
-| `approval-binding-invalidation` | 高风险操作审批 + 失效 | 高风险动作暂停等待**真实人工审批**;批准原动作后执行;参数改动后旧审批指纹失效(SUPERSEDED),被篡改的动作**不执行** |
+| demo1 · 危险命令拦截 | `dangerous-action-denial` | 治理引擎在工具执行前拒绝 `rm -rf /`;**工具执行次数为 0**,审计记录 DENY + rule_id,Agent 收到 POLICY_DENIED 反馈 |
+| demo2 · 失败反馈驱动修复 | `feedback-driven-repair` | 首次实现测试真实失败 → 失败反馈进入下一轮上下文 → Agent 改变动作 → 复验通过,完成由验证器客观复跑判定 |
+| demo3 · 高风险操作审批 + 失效 | `approval-binding-invalidation` | 高风险动作暂停等待**真实人工审批**;批准原动作后执行;参数改动后旧审批指纹失效(SUPERSEDED),被篡改的动作**不执行** |
 
 要点:
 
 - **真实机制,零伪造**:三个 Demo 全部真实经过 HarnessCore + MockLLM + 动作解析 + 工具分发 + 治理引擎 + 反馈回灌 + 审批状态机 + 审计哈希链。成功与否来自场景执行器对**真实审计事件流**的确定性断言(与 `make demo` 同一套 `success_conditions`),而非前端硬编码或 HTTP 200。任一失败绝不在前端伪装成功。
 - **无 Key、无网络、用 MockLLM**:不访问真实 LLM、不访问外部网络、不操作用户真实仓库。
 - **隔离的临时示例工作区**:每次运行有唯一 run ID + 独立临时工作区 + 独立 MockLLM 游标,运行结束后清理(并有惰性清扫兜底);页面刷新后可按 run ID 恢复查询。
+- **操作方式**:Demo Mode 下 Workspace path 是下拉框;选 demo1/2/3 → Task description 自动填充 → 点 Start 运行,下方展示状态标签 + 分步时间线 + 审批面板 + 验收摘要 + 重新运行。标准(非 demo)模式仍是自由填写 workspace + task 的原表单。
 - **Demo 3 如何审批**:运行到高风险动作时状态变为「等待审批」,面板显示动作摘要与风险,点击「批准原动作」后场景继续;随后场景在指纹绑定后改动参数以演示旧审批失效(与 `make demo` demo3 完全同一 `validate_resume`/SUPERSEDED 机制)。
 - **安全边界**:用户只能选择后端白名单中的 Demo ID,不能提交自定义 MockLLM 脚本、任意路径、任意命令、工具白名单或治理策略;Demo 输出经脱敏,不展示密钥/绝对路径/异常堆栈。
 - **已知限制**:Render 免费实例休眠后临时数据丢失;Demo 3 需人工点击批准(未做自动播放);单页轮询(非 SSE)。
