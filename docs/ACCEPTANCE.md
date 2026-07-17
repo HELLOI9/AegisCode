@@ -76,6 +76,30 @@
 
 ---
 
+## 追加任务 D：真实 LLM Provider 可用性（Enhancement，课程要求之外）
+
+> **定位声明：** 此为课程要求之外的追加验收。课程评分口径（§A.4C）只要求 MockLLM 确定性单测；真实 LLM 端到端不是课程强制要求。
+
+### 真实 LLM 端到端测试（人工触发，2026-07-17）
+
+| 验收项 | 证据 |
+|---|---|
+| 使用了真实 Provider（非 MockLLM） | `real_provider: PASS`；`provider=openai model=deepseek-chat`（DeepSeek OpenAI 兼容端点） |
+| `add.py` 由 Harness 工具创建 | `add_py_exists: PASS`；`write_file_tool_executed_events=2` |
+| `test_add.py` 由 Harness 工具创建 | `test_add_py_exists: PASS`；`write_file_tool_executed_events=2` |
+| 动作经解析→治理→工具分发 | `governance_decision_events=3`；审计流记录每次 ACTION_PROPOSED→GOVERNANCE_DECISION→TOOL_EXECUTED |
+| HITL 审批路径演示 | `approval_approved=True`；`write_file` 到工作区根触发 REQUIRE_APPROVAL → 自动批准 → 执行 |
+| pytest 结果进入 Harness 且 COMPLETED 依赖 pytest 通过 | `completed: PASS`；`pytest_passed: PASS`；Harness 最终验证器独立复跑 pytest 通过后方 COMPLETED |
+| 工作区外无副作用 | 生成文件仅 `add.py`/`test_add.py`/`__pycache__`，无跨目录写入 |
+| 日志无 Secret | 输出仅含 `provider/model/configured` + 治理事件计数，无 API Key |
+| Claude Code 独立验收（未修改生成文件） | `python -m pytest /tmp/aegis-e2e-0h162mbh -q` → `1 passed in 0.00s`（`test_add_basic` 含全部 4 条断言：add(1,2)==3 / add(10,20)==30 / add(123,456)==579 / add(7,8)==15） |
+
+**E2E RESULT: PASS**（完整脚本输出与生成文件内容见 `docs/AGENT_LOG.md` 「真实 LLM 端到端验收」节）
+
+**Milestone 8 自动测试（零网络）：** `make test` → **442 passed**（419 基线 + 23 新）；`make demo` → **3 passed, 0 failed**
+
+---
+
 ## 总体验收
 
-当前 worktree(`webui-mock-demos`,追加任务 C)复跑:`make test` → **419 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个原始 task 全部 `✅ DONE` 且带 commit hash + 追加任务 A/B/C;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据。**WebUI 公网部署已完成**(追加任务 B,https://aegiscode-o20h.onrender.com);**WebUI 预设 MockLLM 演示**(追加任务 C)实现 + 自动测试 + 本地 Docker Demo Mode 实测 + **公网人工验收(2026-07-16,PR #12 → main `fb7029f` → Render 重部署)全部通过**(见上「WebUI 预设 MockLLM 演示」矩阵与 AGENT_LOG)。
+当前 worktree(`webui-mock-demos`,追加任务 C)复跑:`make test` → **419 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个原始 task 全部 `✅ DONE` 且带 commit hash + 追加任务 A/B/C/D;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据。**WebUI 公网部署已完成**(追加任务 B,https://aegiscode-o20h.onrender.com);**WebUI 预设 MockLLM 演示**(追加任务 C)实现 + 自动测试 + 本地 Docker Demo Mode 实测 + **公网人工验收(2026-07-16,PR #12 → main `fb7029f` → Render 重部署)全部通过**(见上「WebUI 预设 MockLLM 演示」矩阵与 AGENT_LOG)。**真实 LLM Provider 可用性**(追加任务 D)：DeepSeek 驱动端到端验收通过，完整治理路径（解析→治理→HITL 审批→工具执行→pytest 验证→COMPLETED）实测证明（见上「追加任务 D」矩阵与 AGENT_LOG）。

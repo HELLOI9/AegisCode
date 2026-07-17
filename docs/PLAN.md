@@ -2965,3 +2965,805 @@ M1 主循环→T22,T23 · M2 LLM→T5,T6 · M3 动作协议→T7 · M4 工具分
 ---
 
 *Plan complete. This document contains no executed code; implementation awaits execution-phase approval.*
+
+---
+
+## Milestone 8 — Real-Provider Enhancement (SPEC Appendix B, beyond course requirements)
+
+> **Scope note:** This milestone is a course-requirement **enhancement** (SPEC Appendix B). It makes real Providers (OpenAI / Anthropic / OpenAI-compatible endpoints) actually drive the Harness by giving the LLM a system prompt + registry-driven tool protocol. **MockLLM stays the default; real-LLM tests never enter `make test` or normal CI.** Back-compat rule: `PromptBuilder` is injected as an **optional** `HarnessCore` ctor arg (default `None` → empty prompts), so all 419 existing tests + 4 demos stay green.
+
+**Milestone-local constraints (in addition to Global Constraints):**
+- All new automated tests are zero-network (no real HTTP; adapters take an injected `http_post` fake, exactly like `tests/llm/test_adapters.py`).
+- Reuse the **existing** `Action` parser/protocol (`aegiscode/protocol/parser.py`); never introduce a second action protocol.
+- The system prompt is rendered from `config` + the live `ToolRegistry`; never hardcode the tool list or governance values in the prompt string.
+- No secret ever appears in the prompt or any log; only provider / model / `configured:bool`.
+
+**Dependency order:** T33 (tool metadata) → T34 (registry.describe) → T35 (PromptBuilder) → T36 (harness wiring) → T37 (adapter base_url) → T38 (e2e script + make target). T37 is independent of T33–T36 and may run in parallel.
+
+**File Structure (new / modified this milestone):**
+```
+aegiscode/
+  prompt/
+    __init__.py        # new package (T35)
+    builder.py         # PromptBuilder(config, registry) → system_prompt / tool_protocol (T35)
+  tools/
+    base.py            # Tool Protocol gains description/parameters attrs (T33)
+    file_tools.py      # +description/+parameters on 4 tools (T33)
+    command_tool.py    # +description/+parameters (T33)
+    run_tests_tool.py  # +description/+parameters (T33)
+    finish_tool.py     # +description/+parameters (T33)
+    registry.py        # +describe() renders enabled-tool specs (T34)
+  loop/
+    harness.py         # _build() uses injected prompt_builder + remaining_steps (T36)
+  llm/
+    anthropic_adapter.py # +configurable base_url (T37)
+  service/
+    assembly.py        # build PromptBuilder + inject; pass base_url to Anthropic (T36, T37)
+scripts/
+  e2e_real_llm.py      # human-triggered real-LLM end-to-end (T38)
+Makefile               # +e2e-real-llm target (T38)
+tests/
+  prompt/test_builder.py         # (T35)
+  tools/test_tool_metadata.py    # (T33)
+  tools/test_registry_describe.py# (T34)
+  loop/test_harness_prompt.py    # (T36)
+  llm/test_adapters.py           # +anthropic base_url test (T37)
+```
+
+---
+
+### Task 33: Tool metadata (declarative `description` + `parameters` on all 7 tools)
+
+**Files:**
+- Modify: `aegiscode/tools/base.py`, `aegiscode/tools/file_tools.py`, `aegiscode/tools/command_tool.py`, `aegiscode/tools/run_tests_tool.py`, `aegiscode/tools/finish_tool.py`
+- Test: `tests/tools/test_tool_metadata.py`
+
+**Interfaces:**
+- Consumes: existing tool classes (`WriteFileTool`, `ReadFileTool`, `ListFilesTool`, `SearchTextTool`, `RunCommandTool`, `RunTestsTool`, `FinishTool`).
+- Produces: each tool class carries `description: str` (class attr) and `parameters: dict[str, dict]` mapping arg-name → `{"type": str, "required": bool, "note": str}`. Param names match exactly what `run()` reads from `arguments`. Later tasks (T34 registry.describe, T35 PromptBuilder) render from these.
+
+- [ ] **Step 1: Write the failing test**
+```python
+# tests/tools/test_tool_metadata.py
+import inspect
+from aegiscode.tools.file_tools import WriteFileTool, ReadFileTool, ListFilesTool, SearchTextTool
+from aegiscode.tools.command_tool import RunCommandTool
+from aegiscode.tools.run_tests_tool import RunTestsTool
+from aegiscode.tools.finish_tool import FinishTool
+
+_REQUIRED = {
+    WriteFileTool: {"path", "content"},
+    ReadFileTool: {"path"},
+    ListFilesTool: set(),          # path optional
+    SearchTextTool: {"query"},
+    RunCommandTool: {"command"},
+    RunTestsTool: set(),
+    FinishTool: set(),
+}
+
+def test_every_tool_has_nonempty_description():
+    for cls in _REQUIRED:
+        assert isinstance(cls.description, str) and cls.description.strip()
+
+def test_parameters_declare_required_fields_matching_run():
+    for cls, required in _REQUIRED.items():
+        params = cls.parameters
+        assert isinstance(params, dict)
+        declared_required = {k for k, v in params.items() if v.get("required")}
+        assert declared_required == required, f"{cls.__name__}: {declared_required} != {required}"
+
+def test_parameter_names_are_read_by_run_source():
+    # Guard against schema/behavior drift: every declared param name must appear
+    # in the tool's run() source (it indexes arguments[<name>] or .get(<name>)).
+    for cls in _REQUIRED:
+        src = inspect.getsource(cls.run)
+        for pname in cls.parameters:
+            assert pname in src, f"{cls.__name__}.run does not reference {pname!r}"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/tools/test_tool_metadata.py -v`
+Expected: FAIL — `AttributeError: type object 'WriteFileTool' has no attribute 'description'`.
+
+- [ ] **Step 3: Write minimal implementation** — add class attrs to each tool. Example for the file tools:
+```python
+# aegiscode/tools/file_tools.py — add to each class
+class WriteFileTool:
+    name = "write_file"
+    description = "Overwrite a text file in the workspace with the given content (full-content write)."
+    parameters = {
+        "path": {"type": "string", "required": True, "note": "workspace-relative path; no traversal/absolute/sensitive files"},
+        "content": {"type": "string", "required": True, "note": "full new file contents (text only; size-limited)"},
+    }
+    # ...existing run()...
+
+class ReadFileTool:
+    name = "read_file"
+    description = "Read a text file from the workspace and return its contents."
+    parameters = {"path": {"type": "string", "required": True, "note": "workspace-relative path"}}
+
+class ListFilesTool:
+    name = "list_files"
+    description = "List entries of a workspace directory."
+    parameters = {"path": {"type": "string", "required": False, "note": "workspace-relative dir; defaults to '.'"}}
+
+class SearchTextTool:
+    name = "search_text"
+    description = "Search all text files under the workspace for a substring; returns file:line matches."
+    parameters = {"query": {"type": "string", "required": True, "note": "substring to search for"}}
+```
+```python
+# aegiscode/tools/command_tool.py — RunCommandTool
+    description = "Run an allowlisted shell command (shell=False, argv, cwd locked to workspace)."
+    parameters = {"command": {"type": "string", "required": True, "note": "command string; lexed + allowlist + rule governed"}}
+```
+```python
+# aegiscode/tools/run_tests_tool.py — RunTestsTool
+    description = "Run the project's configured test command (the objective feedback sensor)."
+    parameters = {}  # takes no arguments; uses configured test_command
+```
+```python
+# aegiscode/tools/finish_tool.py — FinishTool
+    description = "Declare the task complete. Only accepted after pytest objectively passes (final verifier re-runs it)."
+    parameters = {}
+```
+Also declare the two attrs on the `Tool` Protocol in `base.py` so the interface documents them:
+```python
+# aegiscode/tools/base.py
+from typing import Protocol
+from aegiscode.tools.result import ToolResult
+
+class Tool(Protocol):
+    name: str
+    description: str
+    parameters: dict
+    def run(self, arguments: dict, ctx) -> ToolResult: ...
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/tools/test_tool_metadata.py -v`
+Expected: PASS (3 tests).
+
+- [ ] **Step 5: Commit**
+```bash
+git add aegiscode/tools/base.py aegiscode/tools/file_tools.py aegiscode/tools/command_tool.py aegiscode/tools/run_tests_tool.py aegiscode/tools/finish_tool.py tests/tools/test_tool_metadata.py
+git commit -m "feat(tools): declarative description+parameters metadata on all 7 tools (Appendix B, T33)"
+```
+
+---
+
+### Task 34: `ToolRegistry.describe()` — render enabled-tool specs from the live registry
+
+**Files:**
+- Modify: `aegiscode/tools/registry.py`
+- Test: `tests/tools/test_registry_describe.py`
+
+**Interfaces:**
+- Consumes: T33 tool metadata (`tool.name`, `tool.description`, `tool.parameters`).
+- Produces: `ToolRegistry.describe() -> str` — a deterministic, human-readable block listing **only registered** tools (name, description, each param with type/required/note). Since `assembly._build_registry` registers only `config.tools.enabled`, disabled tools are structurally absent. T35 PromptBuilder embeds this string into `tool_protocol()`.
+
+- [ ] **Step 1: Write the failing test**
+```python
+# tests/tools/test_registry_describe.py
+from aegiscode.tools.registry import ToolRegistry
+from aegiscode.tools.file_tools import WriteFileTool, ReadFileTool
+
+def test_describe_lists_registered_tools_with_params():
+    reg = ToolRegistry()
+    reg.register(WriteFileTool())
+    reg.register(ReadFileTool())
+    out = reg.describe()
+    assert "write_file" in out and "read_file" in out
+    assert WriteFileTool.description in out
+    assert "path" in out and "content" in out
+    assert "required" in out  # required-field markers rendered
+
+def test_describe_omits_unregistered_tools():
+    reg = ToolRegistry()
+    reg.register(ReadFileTool())  # write_file NOT registered
+    out = reg.describe()
+    assert "read_file" in out
+    assert "write_file" not in out
+
+def test_describe_is_deterministic():
+    reg = ToolRegistry()
+    reg.register(WriteFileTool())
+    reg.register(ReadFileTool())
+    assert reg.describe() == reg.describe()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/tools/test_registry_describe.py -v`
+Expected: FAIL — `AttributeError: 'ToolRegistry' object has no attribute 'describe'`.
+
+- [ ] **Step 3: Write minimal implementation**
+```python
+# aegiscode/tools/registry.py
+class ToolRegistry:
+    def __init__(self): self._tools = {}
+    def register(self, tool): self._tools[tool.name] = tool
+    def get(self, name): return self._tools.get(name)
+    def names(self): return list(self._tools)
+
+    def describe(self) -> str:
+        """Render a deterministic spec block for every REGISTERED tool.
+
+        Disabled tools are never registered (assembly builds the registry from
+        config.tools.enabled), so they cannot appear here. Iteration order is
+        registration order (dict preserves insertion), so output is stable.
+        """
+        blocks = []
+        for name in self._tools:
+            t = self._tools[name]
+            lines = [f"- {t.name}: {t.description}"]
+            params = getattr(t, "parameters", {})
+            if not params:
+                lines.append("    (no arguments)")
+            for pname, meta in params.items():
+                req = "required" if meta.get("required") else "optional"
+                note = meta.get("note", "")
+                lines.append(f"    - {pname} ({meta.get('type','string')}, {req}): {note}")
+            blocks.append("\n".join(lines))
+        return "\n".join(blocks)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/tools/test_registry_describe.py -v`
+Expected: PASS (3 tests).
+
+- [ ] **Step 5: Commit**
+```bash
+git add aegiscode/tools/registry.py tests/tools/test_registry_describe.py
+git commit -m "feat(tools): ToolRegistry.describe() renders enabled-tool specs from live registry (Appendix B, T34)"
+```
+
+---
+
+### Task 35: PromptBuilder — provider-agnostic system prompt + tool protocol
+
+**Files:**
+- Create: `aegiscode/prompt/__init__.py`, `aegiscode/prompt/builder.py`
+- Test: `tests/prompt/__init__.py`, `tests/prompt/test_builder.py`
+
+**Interfaces:**
+- Consumes: `AegisConfig` (`config.governance.command_allowlist`, `.command_rules`, `.sensitive_file_patterns`, `config.tools.enabled`) and a `ToolRegistry` (T34 `describe()`).
+- Produces:
+  - `PromptBuilder(config, registry)`
+  - `.system_prompt(remaining_steps: int) -> str` — identity, no-direct-fs/shell, one-action-per-turn, enabled-tools-only, workspace boundary (concrete sensitive patterns + allowlist + key rules from config), feedback discipline, "no finish before pytest passes", remaining-steps.
+  - `.tool_protocol() -> str` — the exact `Action` JSON contract (single ```json object, `{thought, tool, arguments, expectation}`) + `registry.describe()`.
+
+- [ ] **Step 1: Write the failing test**
+```python
+# tests/prompt/test_builder.py
+from aegiscode.config.schema import AegisConfig
+from aegiscode.prompt.builder import PromptBuilder
+from aegiscode.tools.registry import ToolRegistry
+from aegiscode.tools.file_tools import WriteFileTool, ReadFileTool
+from aegiscode.tools.finish_tool import FinishTool
+
+def _pb(enabled=("write_file", "read_file", "finish")):
+    cfg = AegisConfig()
+    reg = ToolRegistry()
+    classes = {"write_file": WriteFileTool, "read_file": ReadFileTool, "finish": FinishTool}
+    for n in enabled:
+        reg.register(classes[n]())
+    return PromptBuilder(cfg, reg), cfg
+
+def test_system_prompt_states_identity_and_no_direct_access():
+    pb, _ = _pb()
+    sp = pb.system_prompt(remaining_steps=10)
+    assert "AegisCode" in sp
+    assert "coding agent" in sp.lower()
+    assert "file system" in sp.lower() or "filesystem" in sp.lower()
+    assert "shell" in sp.lower()
+
+def test_system_prompt_states_one_action_and_finish_gate():
+    pb, _ = _pb()
+    sp = pb.system_prompt(remaining_steps=10)
+    assert "one" in sp.lower() and "action" in sp.lower()
+    assert "pytest" in sp.lower()
+    assert "finish" in sp.lower()
+    assert "10" in sp  # remaining steps surfaced
+
+def test_system_prompt_renders_workspace_boundary_from_config():
+    pb, cfg = _pb()
+    sp = pb.system_prompt(remaining_steps=5)
+    for pat in cfg.governance.sensitive_file_patterns:
+        assert pat in sp                       # .env / *.pem / *.key / *credentials* / .git/
+    for cmd in cfg.governance.command_allowlist:
+        assert cmd in sp                       # allowlist rendered concretely
+
+def test_tool_protocol_has_action_schema_and_registry_tools():
+    pb, _ = _pb()
+    tp = pb.tool_protocol()
+    assert "json" in tp.lower()
+    for field in ("thought", "tool", "arguments", "expectation"):
+        assert field in tp
+    assert "write_file" in tp and "read_file" in tp and "finish" in tp
+
+def test_tool_protocol_omits_disabled_tools():
+    pb, _ = _pb(enabled=("read_file", "finish"))  # write_file disabled
+    tp = pb.tool_protocol()
+    assert "read_file" in tp
+    assert "write_file" not in tp
+
+def test_prompt_contains_no_secret_material():
+    pb, _ = _pb()
+    blob = pb.system_prompt(10) + "\n" + pb.tool_protocol()
+    for bad in ("sk-", "api_key", "authorization", "bearer"):
+        assert bad.lower() not in blob.lower()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/prompt/test_builder.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'aegiscode.prompt'`.
+
+- [ ] **Step 3: Write minimal implementation**
+```python
+# aegiscode/prompt/__init__.py
+```
+```python
+# aegiscode/prompt/builder.py
+"""Provider-agnostic prompt construction (SPEC Appendix B).
+
+The Harness Core owns the single PromptBuilder; adapters never build prompts.
+system_prompt + tool_protocol are rendered from config + the live ToolRegistry,
+so disabled tools are structurally absent and governance values are concrete.
+"""
+from __future__ import annotations
+
+
+class PromptBuilder:
+    def __init__(self, config, registry):
+        self.config = config
+        self.registry = registry
+
+    def system_prompt(self, remaining_steps: int) -> str:
+        g = self.config.governance
+        sensitive = ", ".join(g.sensitive_file_patterns)
+        allowlist = ", ".join(g.command_allowlist)
+        rules = "; ".join(
+            f"{r.argv0} {' '.join(r.args_contain)} -> {r.decision.value}"
+            for r in g.command_rules
+        )
+        return (
+            "You are AegisCode, a coding agent running INSIDE the AegisCode "
+            "harness. You have NO direct access to the file system or the shell. "
+            "Every effect happens ONLY through a tool call, which is "
+            "parameter-validated, governed, executed, and audited by the harness.\n"
+            "\n"
+            "Rules you must follow:\n"
+            "- Return EXACTLY ONE structured action per turn (see the tool "
+            "protocol). Never describe multiple actions.\n"
+            "- Use only the tools listed in the tool protocol; no other tool "
+            "exists for you.\n"
+            "- Operate only within the current workspace. Do NOT use path "
+            "traversal ('..'), absolute paths, or touch sensitive files "
+            f"({sensitive}).\n"
+            f"- Command allowlist: {allowlist}. Governed command rules: {rules}.\n"
+            "- After any tool failure, governance denial, parse error, or pytest "
+            "failure, read the feedback and change your next action accordingly.\n"
+            "- Never claim you performed an action you did not actually emit as a "
+            "tool call.\n"
+            "- Emit the `finish` action ONLY after the tests objectively pass "
+            "(pytest exit code 0); the harness independently re-runs pytest before "
+            "accepting completion.\n"
+            f"- You have {remaining_steps} step(s) remaining."
+        )
+
+    def tool_protocol(self) -> str:
+        return (
+            "TOOL PROTOCOL — respond with a SINGLE JSON object in a ```json "
+            "fenced block, and nothing else that could be mistaken for JSON:\n"
+            "```json\n"
+            '{"thought": "<your reasoning>", "tool": "<tool name>", '
+            '"arguments": {<tool arguments>}, "expectation": "<what you expect>"}\n'
+            "```\n"
+            "`thought` and `expectation` are optional; `tool` and `arguments` are "
+            "required. `arguments` must match the selected tool's schema below.\n"
+            "\n"
+            "Available tools:\n"
+            + self.registry.describe()
+        )
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/prompt/test_builder.py -v`
+Expected: PASS (6 tests).
+
+- [ ] **Step 5: Commit**
+```bash
+git add aegiscode/prompt tests/prompt
+git commit -m "feat(prompt): provider-agnostic PromptBuilder (system prompt + registry-driven tool protocol) (Appendix B, T35)"
+```
+
+---
+
+### Task 36: Wire PromptBuilder into HarnessCore (`_build`) + assembly injection
+
+**Files:**
+- Modify: `aegiscode/loop/harness.py` (ctor + `_build`), `aegiscode/service/assembly.py` (build + inject PromptBuilder)
+- Test: `tests/loop/test_harness_prompt.py`
+
+**Interfaces:**
+- Consumes: `PromptBuilder` (T35), existing `build_context` (signature unchanged).
+- Produces: `HarnessCore(..., prompt_builder=None)` optional ctor arg. When set, `_build` calls `prompt_builder.system_prompt(remaining_steps)` + `.tool_protocol()`; when `None`, keeps the current empty-string behavior (back-compat for all existing tests). `remaining_steps = max(0, config.limits.max_steps - current_step)`.
+
+- [ ] **Step 1: Write the failing test**
+```python
+# tests/loop/test_harness_prompt.py
+from types import SimpleNamespace
+from aegiscode.config.schema import AegisConfig
+from aegiscode.loop.harness import HarnessCore
+from aegiscode.llm.mock import MockLLM
+from aegiscode.prompt.builder import PromptBuilder
+from aegiscode.tools.registry import ToolRegistry
+from aegiscode.tools.finish_tool import FinishTool
+
+class _Audit:
+    def append(self, *a, **k): pass
+
+def _harness(prompt_builder):
+    cfg = AegisConfig()
+    llm = MockLLM(['{"tool":"finish","arguments":{}}'])
+    ctx = SimpleNamespace(task_id="t1", workspace_root="/tmp")
+    return HarnessCore(
+        llm=llm, dispatcher=None, audit=_Audit(), config=cfg, ctx=ctx,
+        final_verifier=lambda: True, prompt_builder=prompt_builder,
+    ), llm
+
+def test_build_injects_prompt_when_builder_present():
+    reg = ToolRegistry(); reg.register(FinishTool())
+    pb = PromptBuilder(AegisConfig(), reg)
+    h, llm = _harness(pb)
+    msgs = h._build("do the thing", recent_steps=[], last_feedback="")
+    system = "\n".join(m["content"] for m in msgs if m["role"] == "system")
+    assert "AegisCode" in system            # system prompt present
+    assert "finish" in system               # tool protocol present
+    assert any("do the thing" in m["content"] for m in msgs)
+
+def test_build_empty_prompt_when_no_builder_backcompat():
+    h, _ = _harness(prompt_builder=None)
+    msgs = h._build("task", recent_steps=[], last_feedback="")
+    system = "\n".join(m["content"] for m in msgs if m["role"] == "system")
+    assert system.strip() == ""             # unchanged legacy behavior
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/loop/test_harness_prompt.py -v`
+Expected: FAIL — `HarnessCore.__init__` has no `prompt_builder`; `_build` ignores it.
+
+- [ ] **Step 3: Write minimal implementation**
+```python
+# aegiscode/loop/harness.py — add to __init__ signature and body
+    def __init__(self, llm, dispatcher, audit, config, ctx, final_verifier,
+                 approval_resolver=None, cancel_check=None, memory_store=None,
+                 project_id=None, prompt_builder=None):
+        # ...existing assignments...
+        self.prompt_builder = prompt_builder
+```
+```python
+# aegiscode/loop/harness.py — _build now threads remaining_steps + prompt
+    def _build(self, task, recent_steps, last_feedback, current_step=0):
+        if self.prompt_builder is not None:
+            remaining = max(0, self.config.limits.max_steps - current_step)
+            system_prompt = self.prompt_builder.system_prompt(remaining)
+            tool_protocol = self.prompt_builder.tool_protocol()
+        else:
+            system_prompt, tool_protocol = "", ""
+        return build_context(
+            system_prompt=system_prompt,
+            tool_protocol=tool_protocol,
+            task=task,
+            recent_steps=recent_steps,
+            last_feedback=last_feedback,
+            memories=self._retrieve_memories(),
+            budget_chars=self.config.memory.context_budget_chars,
+        )
+```
+Update the single call site in `run()` to pass the step counter:
+```python
+# aegiscode/loop/harness.py — inside run(), replace the existing _build call
+                messages = self._build(task_description, recent_steps, last_feedback, current_step=c.step)
+```
+Then inject the builder in assembly:
+```python
+# aegiscode/service/assembly.py — imports
+from aegiscode.prompt.builder import PromptBuilder
+```
+```python
+# aegiscode/service/assembly.py — inside build_service, after registry is built
+    prompt_builder = PromptBuilder(config, registry)
+```
+```python
+# aegiscode/service/assembly.py — inside harness_factory, add to HarnessCore(...)
+            prompt_builder=prompt_builder,
+```
+
+- [ ] **Step 4: Run tests to verify they pass (incl. full regression for back-compat)**
+
+Run: `pytest tests/loop/test_harness_prompt.py -v && pytest -q`
+Expected: new tests PASS; full suite still green (existing HarnessCore tests pass `prompt_builder=None` implicitly).
+
+- [ ] **Step 5: Commit**
+```bash
+git add aegiscode/loop/harness.py aegiscode/service/assembly.py tests/loop/test_harness_prompt.py
+git commit -m "feat(loop): inject PromptBuilder into HarnessCore._build with remaining-steps (Appendix B, T36)"
+```
+
+---
+
+### Task 37: Configurable `base_url` on AnthropicAdapter + assembly passes it
+
+**Files:**
+- Modify: `aegiscode/llm/anthropic_adapter.py`, `aegiscode/service/assembly.py`
+- Test: `tests/llm/test_adapters.py` (add cases)
+
+**Interfaces:**
+- Consumes: `config.llm.base_url` (already in schema).
+- Produces: `AnthropicAdapter(model, api_key, base_url=None, http_post=...)` posting to `{base_url or 'https://api.anthropic.com'}/v1/messages`. `assembly.build_llm` passes `base_url=config.llm.base_url` to Anthropic. (This task is independent of T33–T36.)
+
+- [ ] **Step 1: Write the failing test** (append to `tests/llm/test_adapters.py`)
+```python
+def test_anthropic_uses_custom_base_url():
+    seen = {}
+    def cap(url, headers, json):
+        seen["url"] = url
+        return {"content":[{"type":"text","text":"ok"}]}
+    a = AnthropicAdapter("claude-x", "k", base_url="https://proxy.example", http_post=cap)
+    a.complete([{"role":"user","content":"hi"}])
+    assert seen["url"] == "https://proxy.example/v1/messages"
+
+def test_anthropic_default_base_url():
+    seen = {}
+    def cap(url, headers, json):
+        seen["url"] = url
+        return {"content":[{"type":"text","text":"ok"}]}
+    a = AnthropicAdapter("claude-x", "k", http_post=cap)
+    a.complete([{"role":"user","content":"hi"}])
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/llm/test_adapters.py -k anthropic_uses_custom_base_url -v`
+Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'base_url'`.
+
+- [ ] **Step 3: Write minimal implementation**
+```python
+# aegiscode/llm/anthropic_adapter.py
+from aegiscode.llm.base import LLMClient
+from aegiscode.llm.openai_adapter import _real_post
+
+class AnthropicAdapter(LLMClient):
+    def __init__(self, model, api_key, base_url=None, http_post=_real_post):
+        self.model, self.api_key, self._post = model, api_key, http_post
+        self.base_url = base_url or "https://api.anthropic.com"
+    def complete(self, messages):
+        system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+        convo = [m for m in messages if m["role"] != "system"]
+        r = self._post(f"{self.base_url}/v1/messages",
+            {"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
+            {"model": self.model, "max_tokens": 4096, "system": system, "messages": convo})
+        return "".join(b["text"] for b in r["content"] if b.get("type") == "text")
+```
+```python
+# aegiscode/service/assembly.py — build_llm, anthropic branch
+    if provider == "anthropic":
+        from aegiscode.llm.anthropic_adapter import AnthropicAdapter
+        return AnthropicAdapter(model=config.llm.model, api_key=key, base_url=config.llm.base_url)
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/llm/test_adapters.py -v`
+Expected: PASS (all adapter tests, incl. the 2 new ones).
+
+- [ ] **Step 5: Commit**
+```bash
+git add aegiscode/llm/anthropic_adapter.py aegiscode/service/assembly.py tests/llm/test_adapters.py
+git commit -m "feat(llm): configurable base_url on AnthropicAdapter; assembly passes it (Appendix B, T37)"
+```
+
+---
+
+### Task 38: `make e2e-real-llm` — human-triggered real-LLM end-to-end harness
+
+**Files:**
+- Create: `scripts/e2e_real_llm.py`, `tests/test_e2e_real_llm_offline.py` (offline structural guard only)
+- Modify: `Makefile` (add `e2e-real-llm` target; it is NOT a dependency of `test`)
+
+**Interfaces:**
+- Consumes: `build_service` (real CLI path), `build_credential_store`, `load_config`, `MockLLM` (only for the offline verifier-logic guard).
+- Produces:
+  - `scripts/e2e_real_llm.py` with `run_e2e(config, store, workspace) -> dict` (the orchestration: creates a fresh tmp workspace, submits the fixed add.py/test_add.py task via a real Provider harness) and `verify(workspace, service, task_id, provider_name) -> dict` (checks: provider != Mock, both files exist and were tool-created, task COMPLETED, pytest passed, no side effects outside workspace). `main()` wires config → store → tmp workspace → run → verify → redacted report; exit non-zero on any failed check.
+  - `make e2e-real-llm` target running `python scripts/e2e_real_llm.py`.
+- **The offline test never selects a real provider** — it only exercises `verify()` against a hand-built COMPLETED/pytest-green fixture and asserts the pass/fail contract, so `make test` stays zero-network.
+
+- [ ] **Step 1: Write the failing test (offline verifier-logic guard only)**
+```python
+# tests/test_e2e_real_llm_offline.py
+"""Offline guard for the e2e harness's VERIFY logic. Never touches a real
+provider or the network — that is the human-triggered `make e2e-real-llm`."""
+import os, subprocess, sys, tempfile, importlib.util, pathlib
+
+def _load():
+    p = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "e2e_real_llm.py"
+    spec = importlib.util.spec_from_file_location("e2e_real_llm", p)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+def test_verify_passes_on_green_fixture(tmp_path):
+    m = _load()
+    (tmp_path / "add.py").write_text("def add(a,b): return a+b\n")
+    (tmp_path / "test_add.py").write_text(
+        "from add import add\n"
+        "def test_a(): assert add(1,2)==3\n"
+    )
+    checks = m.verify(str(tmp_path), provider_name="OpenAIAdapter", completed=True,
+                      pytest_passed=True)
+    assert all(checks.values()), checks
+
+def test_verify_fails_when_provider_is_mock(tmp_path):
+    m = _load()
+    (tmp_path / "add.py").write_text("x")
+    (tmp_path / "test_add.py").write_text("x")
+    checks = m.verify(str(tmp_path), provider_name="MockLLM", completed=True,
+                      pytest_passed=True)
+    assert checks["real_provider"] is False
+
+def test_verify_fails_when_pytest_not_passed(tmp_path):
+    m = _load()
+    (tmp_path / "add.py").write_text("x")
+    (tmp_path / "test_add.py").write_text("x")
+    checks = m.verify(str(tmp_path), provider_name="OpenAIAdapter", completed=True,
+                      pytest_passed=False)
+    assert checks["pytest_passed"] is False
+
+def test_verify_fails_when_files_missing(tmp_path):
+    m = _load()
+    checks = m.verify(str(tmp_path), provider_name="OpenAIAdapter", completed=True,
+                      pytest_passed=True)
+    assert checks["add_py_exists"] is False and checks["test_add_py_exists"] is False
+
+def test_makefile_e2e_target_not_in_test():
+    mk = pathlib.Path("Makefile").read_text()
+    assert "e2e-real-llm:" in mk
+    # e2e must NOT be a prerequisite of the test target
+    test_line = [l for l in mk.splitlines() if l.startswith("test:")][0]
+    assert "e2e" not in test_line
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_e2e_real_llm_offline.py -v`
+Expected: FAIL — `scripts/e2e_real_llm.py` missing.
+
+- [ ] **Step 3: Write minimal implementation**
+```python
+# scripts/e2e_real_llm.py
+"""Human-triggered real-LLM end-to-end test (SPEC Appendix B.7).
+
+NOT part of `make test` / CI. Uses a fresh temp workspace, a REAL provider from
+config, and the real CLI path (build_service → HarnessCore). Proves the harness
+(not hardcoded source) creates add.py/test_add.py and that COMPLETED depends on
+pytest passing. May incur API cost. Output is redacted (no secret).
+"""
+from __future__ import annotations
+import os, shlex, subprocess, sys, tempfile
+
+TASK = (
+    "In the current workspace create add.py and test_add.py. "
+    "add.py must define add(a, b) returning the sum of two positive integers. "
+    "test_add.py must use pytest and assert add(1,2)==3, add(10,20)==30, "
+    "add(123,456)==579, add(7,8)==15. Do not access files outside the workspace, "
+    "do not use the network, do not create unrelated files. Run pytest -q and only "
+    "finish once all tests pass."
+)
+
+def verify(workspace, provider_name, completed, pytest_passed):
+    """Return a dict of named boolean checks. All True => e2e PASS."""
+    add_py = os.path.join(workspace, "add.py")
+    test_py = os.path.join(workspace, "test_add.py")
+    checks = {
+        "real_provider": provider_name != "MockLLM",
+        "add_py_exists": os.path.isfile(add_py),
+        "test_add_py_exists": os.path.isfile(test_py),
+        "completed": bool(completed),
+        "pytest_passed": bool(pytest_passed),
+    }
+    return checks
+
+def run_e2e(config, store, workspace):
+    from aegiscode.service.assembly import build_service
+    db_path = os.path.join(workspace, ".aegis.db")
+    if config.workspace.allowed_base is None:
+        config.workspace.allowed_base = workspace
+    service = build_service(config, store, db_path, sync=True)
+    provider_name = type(service_llm(service)).__name__
+    task_id = service.create_task(workspace=workspace, description=TASK)
+    row = service.get_task(task_id)
+    completed = row.get("state") == "COMPLETED"
+    # Independent pytest re-run over the harness output (does NOT modify files).
+    p = subprocess.run(shlex.split("python -m pytest -q"), cwd=workspace,
+                       capture_output=True, text=True)
+    return provider_name, completed, p.returncode == 0
+
+def service_llm(service):
+    # Reach the concrete llm the service's harness_factory bound (for provider proof).
+    h = service._harness_factory("probe", tempfile.mkdtemp())
+    return h.llm
+
+def main():
+    from aegiscode.config.loader import load_config
+    from aegiscode.credentials.backend import build_credential_store
+    cfg_path = os.environ.get("AEGIS_CONFIG", "aegis.yaml")
+    config = load_config(cfg_path)
+    if config.llm.provider == "mock":
+        print("REFUSING: llm.provider is 'mock'. Set a real provider + key.", file=sys.stderr)
+        return 2
+    store = build_credential_store()
+    workspace = tempfile.mkdtemp(prefix="aegis-e2e-")
+    print(f"provider={config.llm.provider} model={config.llm.model} "
+          f"credential={'configured' if store.status()['configured'] else 'MISSING'}")
+    provider_name, completed, pytest_passed = run_e2e(config, store, workspace)
+    checks = verify(workspace, provider_name, completed, pytest_passed)
+    print(f"workspace={workspace}")
+    for k, v in checks.items():
+        print(f"  {'PASS' if v else 'FAIL'}  {k}")
+    ok = all(checks.values())
+    print("E2E RESULT:", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+Add the Makefile target (and ensure `test:` has no e2e prerequisite):
+```makefile
+# Makefile — append
+.PHONY: e2e-real-llm
+e2e-real-llm:
+	$(PY) scripts/e2e_real_llm.py
+```
+> **Note for implementer:** `service._harness_factory` / `service.get_task` names must match `ApplicationService`. If the real attribute differs (e.g. `harness_factory` without underscore), adapt `service_llm`/`run_e2e` to the actual `ApplicationService` API — verify by reading `aegiscode/service/app_service.py` before implementing. The offline test only pins `verify()` (pure logic) + the Makefile contract, so it stays green regardless.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/test_e2e_real_llm_offline.py -v && pytest -q`
+Expected: offline guard PASS; full suite green; `make test` still zero-network.
+
+- [ ] **Step 5: Commit**
+```bash
+git add scripts/e2e_real_llm.py tests/test_e2e_real_llm_offline.py Makefile
+git commit -m "feat(e2e): human-triggered make e2e-real-llm harness + offline verify guard (Appendix B, T38)"
+```
+
+---
+
+## Milestone 8 Self-Review
+
+**1. Spec coverage (Appendix B):**
+- B.2 PromptBuilder (system_prompt + tool_protocol) → **T35**.
+- B.3 tool metadata from registry → **T33** (metadata) + **T34** (`describe()`).
+- B.4 context/error handling (remaining steps; existing feedback loop reused) → **T36** (`remaining_steps`); feedback re-entry already covered by T18/T23 (unchanged).
+- B.5 adapter base_url + CLI provider selection + no-secret logs → **T37** (base_url); provider selection already in `build_llm` (T5/assembly, unchanged); no-secret verified by T35 `test_prompt_contains_no_secret_material` + existing redactor tests.
+- B.6 deterministic tests (all bullets) → distributed across T33–T38 test steps (PromptBuilder content, registry-driven descriptions, disabled-tool omission, no secret, adapter system-prompt+base_url, parser accept/reject already in `tests/protocol`, feedback re-entry already in `tests/loop`).
+- B.7 `make e2e-real-llm` → **T38**.
+- B.8 completion conditions → satisfied by T35 (system prompt) + T34 (dynamic protocol) + existing single-action loop + T36 finish-gate wiring + T37 adapter + redactor. **No uncovered Appendix B item.**
+
+**2. Placeholder scan:** every code step shows real code; the one "adapt to actual API" note in T38 is an explicit read-first instruction with a named file, not a placeholder — the offline test pins the pure logic so the task is still objectively gated.
+
+**3. Type consistency:** `PromptBuilder(config, registry)` + `.system_prompt(remaining_steps)` + `.tool_protocol()` identical across T35/T36; `ToolRegistry.describe()` (T34) consumed by T35; `tool.description`/`tool.parameters` (T33) consumed by T34; `HarnessCore(..., prompt_builder=None)` (T36) matches assembly injection; `AnthropicAdapter(model, api_key, base_url=None, http_post=...)` (T37) matches assembly call. `verify(workspace, provider_name, completed, pytest_passed)` identical across T38 test + impl.
+
+**Back-compat guarantee:** T36 keeps `prompt_builder=None` behavior byte-identical to today, so the existing 419 tests + 4 demos remain green; T33/T34/T37 are additive.
+
+---
+
+*Milestone 8 (Appendix B enhancement) plan complete. No executed code; implementation awaits execution-phase approval.*

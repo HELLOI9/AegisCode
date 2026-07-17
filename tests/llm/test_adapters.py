@@ -47,3 +47,21 @@ def test_anthropic_extracts_text_and_splits_system():
     assert out == "OK-ANT"
     assert seen["system"] == "S"                     # system pulled out of messages
     assert all(m["role"] != "system" for m in seen["messages"])
+
+def test_anthropic_uses_custom_base_url():
+    seen = {}
+    def cap(url, headers, json):
+        seen["url"] = url
+        return {"content":[{"type":"text","text":"ok"}]}
+    a = AnthropicAdapter("claude-x", "k", base_url="https://proxy.example", http_post=cap)
+    a.complete([{"role":"user","content":"hi"}])
+    assert seen["url"] == "https://proxy.example/v1/messages"
+
+def test_anthropic_default_base_url():
+    seen = {}
+    def cap(url, headers, json):
+        seen["url"] = url
+        return {"content":[{"type":"text","text":"ok"}]}
+    a = AnthropicAdapter("claude-x", "k", http_post=cap)
+    a.complete([{"role":"user","content":"hi"}])
+    assert seen["url"] == "https://api.anthropic.com/v1/messages"

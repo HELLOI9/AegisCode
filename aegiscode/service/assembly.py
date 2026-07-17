@@ -17,6 +17,7 @@ from aegiscode.llm.mock import MockLLM
 from aegiscode.loop.harness import HarnessCore
 from aegiscode.memory.store import MemoryStore
 from aegiscode.persistence.db import open_db
+from aegiscode.prompt.builder import PromptBuilder
 from aegiscode.service.app_service import ApplicationService, _workspace_hash
 from aegiscode.tools.command_tool import RunCommandTool
 from aegiscode.tools.file_tools import (
@@ -54,7 +55,9 @@ def build_llm(config, credential_store):
     if provider == "anthropic":
         from aegiscode.llm.anthropic_adapter import AnthropicAdapter
 
-        return AnthropicAdapter(model=config.llm.model, api_key=key)
+        return AnthropicAdapter(
+            model=config.llm.model, api_key=key, base_url=config.llm.base_url
+        )
 
     raise NoKeyError(f"unknown llm provider: {provider!r}")
 
@@ -119,7 +122,9 @@ def _make_final_verifier(config, workspace):
     return verify
 
 
-def build_service(config, credential_store, db_path: str, sync: bool = False):
+def build_service(
+    config, credential_store, db_path: str, sync: bool = False, sync_decision_fn=None
+):
     """Assemble a real ApplicationService.
 
     Parameters
@@ -132,6 +137,14 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
     sync : bool
         If True, create_task runs inline (blocking) — used by the CLI so a run
         terminates before the process exits.
+    sync_decision_fn : Callable[[str], bool] | None
+        Sync-mode only: given an approval_id, returns True to approve. Passed
+        straight through to ApplicationService. Defaults to None, which
+        preserves today's production behavior exactly: a sync-mode
+        REQUIRE_APPROVAL with no decision fn auto-rejects (fail closed). The
+        real CLI does not pass this; only trusted callers (e.g. the
+        human-triggered e2e harness standing in for a human clicking
+        "approve") should.
 
     Raises
     ------
@@ -141,6 +154,7 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
     conn = open_db(db_path)
     memory_store = MemoryStore(conn)
     registry = _build_registry(config)
+    prompt_builder = PromptBuilder(config, registry)
     dispatcher = build_dispatcher(config, registry)
     llm = build_llm(config, credential_store)
 
@@ -176,6 +190,7 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
             # Stable per-workspace project scope: same hash the task repo uses
             # (app_service._workspace_hash), so retrieved memory is per project.
             project_id=_workspace_hash(workspace),
+            prompt_builder=prompt_builder,
         )
 
     return ApplicationService(
@@ -184,4 +199,5 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
         config=config,
         harness_factory=harness_factory,
         sync=sync,
+        sync_decision_fn=sync_decision_fn,
     )

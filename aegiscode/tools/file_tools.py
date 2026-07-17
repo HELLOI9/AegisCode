@@ -9,6 +9,11 @@ def _is_binary(b: bytes) -> bool:
 
 class WriteFileTool:
     name = "write_file"
+    description = "Overwrite a text file in the workspace with the given content (full-content write)."
+    parameters = {
+        "path": {"type": "string", "required": True, "note": "workspace-relative path; no traversal/absolute/sensitive files"},
+        "content": {"type": "string", "required": True, "note": "full new file contents (text only; size-limited)"},
+    }
 
     def run(self, arguments, ctx):
         path, content = arguments["path"], arguments["content"]
@@ -30,6 +35,8 @@ class WriteFileTool:
 
 class ReadFileTool:
     name = "read_file"
+    description = "Read a text file from the workspace and return its contents."
+    parameters = {"path": {"type": "string", "required": True, "note": "workspace-relative path"}}
 
     def run(self, arguments, ctx):
         try:
@@ -47,6 +54,8 @@ class ReadFileTool:
 
 class ListFilesTool:
     name = "list_files"
+    description = "List entries of a workspace directory."
+    parameters = {"path": {"type": "string", "required": False, "note": "workspace-relative dir; defaults to '.'"}}
 
     def run(self, arguments, ctx):
         root = ctx.resolve(arguments.get("path", "."))
@@ -61,6 +70,8 @@ class ListFilesTool:
 
 class SearchTextTool:
     name = "search_text"
+    description = "Search all text files under the workspace for a substring; returns file:line matches."
+    parameters = {"query": {"type": "string", "required": True, "note": "substring to search for"}}
 
     def run(self, arguments, ctx):
         q, hits = arguments["query"], []

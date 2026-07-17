@@ -8,7 +8,7 @@
 # failure), so CI can gate on it directly.
 PY ?= python
 
-.PHONY: test demo demo-guardrail demo-feedback demo-approval deploy-check
+.PHONY: test demo demo-guardrail demo-feedback demo-approval deploy-check e2e-real-llm
 
 test:
 	pytest -q
@@ -31,3 +31,8 @@ ifndef DEPLOY_URL
 	$(error DEPLOY_URL is required. Usage: make deploy-check DEPLOY_URL=https://...)
 endif
 	$(PY) scripts/deploy_check.py $(DEPLOY_URL)
+
+# Human-triggered ONLY — real provider + network + API cost. Never a
+# prerequisite of `test`, never run in CI (SPEC Appendix B.7).
+e2e-real-llm:
+	$(PY) scripts/e2e_real_llm.py
