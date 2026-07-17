@@ -116,6 +116,32 @@ export AEGIS_LLM_PROVIDER=mock
 
 `make test` 与 `make demo` 都**不需要真实凭据**。
 
+## 7.1 真实 LLM Provider（课程要求之外的追加能力 / enhancement）
+
+> 详见 `docs/SPEC.md` 附录 B。**课程从未强制要求真实 LLM 端到端测试**;默认与评分仍以 MockLLM 确定性测试为准。此为额外让真实模型可用的增强。
+
+配置 `aegis.yaml`(或环境变量 `AEGIS_LLM_PROVIDER`/`AEGIS_LLM_MODEL`)选择真实 Provider:
+
+```yaml
+llm:
+  provider: openai        # openai | anthropic | mock
+  model: gpt-4o           # 供应商模型 ID
+  # base_url: https://api.openai.com/v1   # 可选:覆盖到本地/代理/兼容端点
+```
+
+- **provider**:`openai`、`anthropic` 或 `mock`。
+- **base_url**:两个适配器都支持。OpenAIAdapter 会向 `{base_url}/chat/completions` 发请求,故 OpenAI 兼容端点(DeepSeek / 通义 / vLLM 等)填其 base(如 `https://api.deepseek.com`)即可;AnthropicAdapter 向 `{base_url}/v1/messages` 发请求,默认 `https://api.anthropic.com`。
+- 适配器只负责传输(按供应商格式发送 system prompt + messages、可配 model/base_url/超时、标准化错误),**不**自维护 Agent Loop、不执行工具、不定治理策略。
+- 真实运行前需 `aegiscode key set` 配置 Key。运行 `aegiscode run --workspace <dir> --task "..."` 即用真实模型驱动完整治理闭环。
+
+**人工触发的真实 LLM 端到端测试**(需真实 Key + 网络,**可能产生 API 费用**):
+
+```bash
+make e2e-real-llm     # 使用临时工作区,不进 make test/普通 CI,失败非零退出,输出脱敏
+```
+
+该命令用真实 Provider 经 AegisCode 本地 harness 在全新临时工作区创建 `add.py`/`test_add.py`,证明动作经解析→治理→工具分发、pytest 结果进入 harness、最终完成依赖 pytest 通过、工作区外无副作用、日志无 Secret。若 `provider: mock` 会拒绝运行(退出码 2)。
+
 ## 8. 测试命令
 
 ```bash
