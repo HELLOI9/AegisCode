@@ -609,3 +609,60 @@ harness 每个核心机制（工具分发、治理拦截、反馈回灌、记忆
 本 SPEC 的每一项决策均来自 `SPEC_PROCESS.md` 第 1~25 轮的逐轮讨论记录（含被否决方案与分歧记录）。三处用户推翻/修正智能体推荐的关键节点：绝对路径策略（第 13 轮）、Agent 写记忆（第 16 轮）、云部署鉴权场景澄清（第 19 轮）。
 
 **本文档为设计规约，不含实现代码。实现须待 PLAN.md 产出后，按 TDD 红-绿-重构进行。**
+
+---
+
+## 附录 B：真实 Provider 可用性（课程要求之外的追加实现 / Enhancement）
+
+> **定位声明（重要）**：本附录描述的能力是**课程要求之外的追加实现（enhancement）**。课程评分口径（§A.4C）只要求"移除真实 LLM 后每个核心机制可用 MockLLM/stub 确定性单测验证"，AegisCode 主体已满足。**课程从未强制要求真实 LLM 端到端测试。** 本附录让真实 Provider（OpenAI / Anthropic / OpenAI 兼容端点如 DeepSeek/通义/vLLM）能够真正驱动 Harness 完成编码任务；默认测试仍以 MockLLM 为准，真实 LLM 测试不进入 `make test` 与普通 CI。
+
+### B.1 追加动机（真实 CLI 当前失败的直接原因）
+
+主体实现中，`HarnessCore._build()` 以 `system_prompt=""`、`tool_protocol=""` 调用 `build_context`。MockLLM 按脚本回放不受影响（故 §16 全部确定性测试与四演示通过），但真实模型**只收到任务文本**——没有身份、没有动作 JSON 协议、没有工具清单、没有工作区规则。真实模型无从得知必须输出 `{tool, arguments}` 结构化动作，其散文输出每轮触发 `ActionParseError` → `INVALID_ACTION` 反馈，直至 `action_retry_limit` / `max_steps` 停机，永远不会创建文件。**追加实现的核心即：由 Harness Core 构造完整、Provider 无关的上下文。**
+
+### B.2 PromptBuilder（Provider 无关，新增 `aegiscode/prompt/builder.py`）
+
+Harness Core 使用**唯一的** `PromptBuilder`，不在各 Adapter 中复制提示词。以 `(config, registry)` 构造，产出两段文本，经既有 `build_context(system_prompt, tool_protocol, ...)`（签名不变）装配为 messages。
+
+- **`system_prompt(remaining_steps)`** 必须明确：
+  - 模型是运行在 AegisCode 中的 coding agent；
+  - 不能直接访问文件系统和 Shell——一切副作用只能经工具（参数校验 → 治理 → 执行 → 审计）；
+  - 每轮只能返回**一个**合法结构化动作；
+  - 只能使用当前 Tool Registry 中**启用**的工具；
+  - 只能操作当前 workspace；禁止路径穿越、绝对路径、`.git`、`.env`、`*.pem`/`*.key`、`*credentials*`（从 `config.governance.sensitive_file_patterns` 渲染）；
+  - 命令允许列表与规则（从 `config.governance.command_allowlist` + `command_rules` 具体渲染：如 `pip install`→审批、`git push`/`rm -rf`/`python -c`/`python -m`→拒绝）；
+  - 工具失败、治理拒绝、解析错误、pytest 失败后必须依据反馈调整下一步；
+  - 不能声称执行了未实际执行的动作；
+  - **只有 pytest 客观通过后才能输出 `finish`**；
+  - 剩余步数 `remaining_steps`。
+- **`tool_protocol()`** 复用**既有 Action Parser 协议**（不新建第二套）：`Action = {thought?, tool, arguments, expectation?}`，单个 ```json 围栏对象；随后逐工具块**从 live registry 动态生成**（工具名、功能、参数 Schema、必填字段、当前限制）。**被禁用的工具因未注册而结构性缺席，不会出现在提示词中。**
+
+### B.3 工具元数据（描述来自 Tool Registry）
+
+7 个工具类各新增声明式 `description: str` 与 `parameters: dict`（字段名 → {类型、必填、说明}），字段与各 `run()` 实际从 `arguments` 读取的键**同源**（如 `write_file`→`path`,`content`；`run_command`→`command`；`search_text`→`query`）。`ToolRegistry.describe()` 遍历**已注册**工具渲染规格。由于 `assembly._build_registry` 只注册 `config.tools.enabled` 的工具，"启用集合"已在 registry 结构中，无需第二份易漂移的旁路目录。
+
+### B.4 上下文与错误处理
+
+每轮上下文（经 `build_context`）包含：system prompt、用户任务、当前允许的工具、workspace 约束、前序动作、工具结果、治理反馈、pytest 反馈、必要且脱敏的项目记忆、剩余步数。既有反馈闭环（`harness.py`：`POLICY_DENIED` / `TEST_FAILURE` / `TOOL_ERROR` / `PARSE_ERROR` / `SUPERSEDED` 均回灌 `last_feedback` 与 `recent_steps`）**保持不变**——追加实现只补全出站提示词。
+
+真实模型输出不合法时（既有行为，追加实现依赖之）：不得猜测并执行文本中的命令；不得执行部分解析结果；将具体解析错误作为结构化反馈进入下一轮；连续失败达上限后按现有 stop condition 终止。
+
+### B.5 Adapter 与 CLI
+
+`OpenAIAdapter`、`AnthropicAdapter` 只负责：按供应商格式发送 system prompt 与 messages；使用可配置的 model、base_url、超时；返回模型响应；标准化认证/限流/超时/格式错误。**不得**自维护 Agent Loop、不得自行执行工具、不得自定治理策略。
+
+追加改动：`AnthropicAdapter` 增加可配置 `base_url`（默认 `https://api.anthropic.com`），`assembly.build_llm` 一并传入 `config.llm.base_url`（`OpenAIAdapter` 已支持）。CLI 通过 `config.llm.provider` 明确选择真实 Provider，同时保留 `mock` 模式；配置了 Key 也不会让 `make test` 调用真实 LLM（测试从不选择真实 Provider）。日志只显示 Provider / Model / 凭据已配置或未配置，绝不显示 API Key、Authorization Header 或完整敏感请求。
+
+### B.6 确定性自动测试（零真实网络）
+
+至少覆盖：PromptBuilder 含身份/工具协议/workspace 边界/完成条件；工具描述来自 Tool Registry；禁用工具不暴露；提示词不含 Secret；OpenAI 与 Anthropic 请求正确携带 system prompt；自定义 base_url 与 model 正确传递；合法工具动作与 finish 可解析；非 JSON/多动作/未知工具/缺失参数被拒；解析错误进入下一轮；工具结果、治理反馈、pytest 失败进入下一轮；pytest 未通过时不能 finish；pytest 通过后可正常结束。`make test` 与 `make demo` 全部通过且不访问真实 LLM。
+
+### B.7 真实 LLM 端到端测试（人工触发，`make e2e-real-llm`）
+
+`scripts/e2e_real_llm.py`：使用全新空临时工作区，经**真实 CLI 路径**（`build_service` → HarnessCore）提交固定任务（创建 `add.py`/`test_add.py`、pytest 全通过后方可声明完成）。须证明：使用了真实 Provider 而非 MockLLM；两文件由 Harness 工具创建；动作经解析、治理、工具分发；pytest 结果进入 Harness；最终完成依赖 pytest 通过；工作区外无副作用；日志无 Secret。该命令使用临时工作区、不硬编码正确源码、**不进入默认 `make test`、不进入普通 CI**、失败返回非零退出码、输出脱敏。运行真实 Provider 可能产生 API 费用。
+
+### B.8 完成条件
+
+Harness Core 构造完整 system prompt；工具协议从 Tool Registry 动态生成；每轮只允许一个结构化动作；非法输出会收到反馈；pytest 未通过时不能 finish；Adapter 正确传递 system prompt；CLI 可选择真实 Provider；API Key 不进入日志；`make test` 通过；`make demo` 通过；真实 CLI 能在空工作区创建 `add.py` 与 `test_add.py`；`python -m pytest -q` 通过；工作区边界有效；review 无未处理 Critical / Important 问题。
+
+> **向后兼容**：`PromptBuilder` 作为 `HarnessCore` 可选构造参数注入，缺省 `None` 时回退空提示词，既有 419 项测试与四演示不受影响。
