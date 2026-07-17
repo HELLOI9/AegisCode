@@ -3012,7 +3012,7 @@ tests/
 
 ---
 
-### Task 33: Tool metadata (declarative `description` + `parameters` on all 7 tools)
+### Task 33: Tool metadata (declarative `description` + `parameters` on all 7 tools) ✅ DONE (7ce3e5e)
 
 **Files:**
 - Modify: `aegiscode/tools/base.py`, `aegiscode/tools/file_tools.py`, `aegiscode/tools/command_tool.py`, `aegiscode/tools/run_tests_tool.py`, `aegiscode/tools/finish_tool.py`
@@ -3134,7 +3134,7 @@ git commit -m "feat(tools): declarative description+parameters metadata on all 7
 
 ---
 
-### Task 34: `ToolRegistry.describe()` — render enabled-tool specs from the live registry
+### Task 34: `ToolRegistry.describe()` — render enabled-tool specs from the live registry ✅ DONE (079f77e)
 
 **Files:**
 - Modify: `aegiscode/tools/registry.py`
@@ -3223,7 +3223,7 @@ git commit -m "feat(tools): ToolRegistry.describe() renders enabled-tool specs f
 
 ---
 
-### Task 35: PromptBuilder — provider-agnostic system prompt + tool protocol
+### Task 35: PromptBuilder — provider-agnostic system prompt + tool protocol ✅ DONE (4f1bdc7)
 
 **Files:**
 - Create: `aegiscode/prompt/__init__.py`, `aegiscode/prompt/builder.py`
@@ -3385,7 +3385,7 @@ git commit -m "feat(prompt): provider-agnostic PromptBuilder (system prompt + re
 
 ---
 
-### Task 36: Wire PromptBuilder into HarnessCore (`_build`) + assembly injection
+### Task 36: Wire PromptBuilder into HarnessCore (`_build`) + assembly injection ✅ DONE (5223a0e)
 
 **Files:**
 - Modify: `aegiscode/loop/harness.py` (ctor + `_build`), `aegiscode/service/assembly.py` (build + inject PromptBuilder)
@@ -3500,7 +3500,7 @@ git commit -m "feat(loop): inject PromptBuilder into HarnessCore._build with rem
 
 ---
 
-### Task 37: Configurable `base_url` on AnthropicAdapter + assembly passes it
+### Task 37: Configurable `base_url` on AnthropicAdapter + assembly passes it ✅ DONE (96a80d0)
 
 **Files:**
 - Modify: `aegiscode/llm/anthropic_adapter.py`, `aegiscode/service/assembly.py`
@@ -3574,7 +3574,7 @@ git commit -m "feat(llm): configurable base_url on AnthropicAdapter; assembly pa
 
 ---
 
-### Task 38: `make e2e-real-llm` — human-triggered real-LLM end-to-end harness
+### Task 38: `make e2e-real-llm` — human-triggered real-LLM end-to-end harness ✅ DONE (faff3a4, +fix 281649c)
 
 **Files:**
 - Create: `scripts/e2e_real_llm.py`, `tests/test_e2e_real_llm_offline.py` (offline structural guard only)
