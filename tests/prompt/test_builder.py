@@ -63,6 +63,7 @@ def test_system_prompt_guides_no_repeat_and_finish_after_pass():
     # 不要重复已成功的动作（NO_PROGRESS 引导）
     assert "repeat" in low or "重复" in sp
     assert "no_progress" in low or "no progress" in low or "无进展" in sp
-    # 测试通过后必须 finish
-    assert "finish" in low
-    assert "pass" in low or "通过" in sp
+    # 测试通过后必须 finish —— 命中规则 2 新增文本中的独有短语
+    # ("next action must be" 只出现在规则 2 行，不出现在预先存在的 finish-gate 行中，
+    # 因此删除规则 2 会让该断言失败，而不是像 "finish"/"pass" 一样恒真)
+    assert "next action must be" in low
