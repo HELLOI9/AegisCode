@@ -629,3 +629,60 @@ WebUI: workspace 字段已禁用, value="demo"
 **本地测试**：`make test` → 442 passed（419 基线 + 23 新,零网络）;`make demo` → 3 passed/0 failed。
 
 **人工干预/协调**：控制器一次 SDD 时序失误——曾误将 T36 叙述为"已评审通过"而其实未运行（T37 因此先落地）。以账本 + `git log` 为准发现并纠正:T37 与 T36 计划无依赖,无损;补跑 T36 真实实现 + 评审,并补 T37 遗漏的评审。教训:严格以进度账本 + git log 为真相源,叙述记忆不可信。真实 LLM 端到端验收见下节 / ACCEPTANCE.md。
+
+### 真实 LLM 端到端验收（2026-07-17）
+
+**Provider：** DeepSeek（OpenAI 兼容端点，`base_url=https://api.deepseek.com`，`model=deepseek-chat`）
+
+**运行命令：**
+```bash
+PYTHONPATH=/home/jwdeng/Code/AegisCode/.claude/worktrees/m8-real-provider \
+  python scripts/e2e_real_llm.py
+```
+注：PYTHONPATH 前缀是当前会话环境的一次性修正（venv editable install 指向了另一 worktree），不影响已提交代码。
+
+**脚本输出（脱敏）：**
+```
+provider=openai model=deepseek-chat credential=configured
+workspace=/tmp/aegis-e2e-0h162mbh
+  PASS  real_provider
+  PASS  add_py_exists
+  PASS  test_add_py_exists
+  PASS  completed
+  PASS  pytest_passed
+governance_decision_events=3
+approval_approved=True
+write_file_tool_executed_events=2
+E2E RESULT: PASS
+```
+
+**治理路径证明：** `governance_decision_events=3`（每个工具动作均经过治理判定）；`approval_approved=True`（`write_file` 到工作区根目录触发 `REQUIRE_APPROVAL` → Harness 审批 → 执行，演示了完整 HITL 路径）；`write_file_tool_executed_events=2`（`add.py` 和 `test_add.py` 均由 Harness 工具创建，非脚本手写）。
+
+**生成文件（完全由 Harness 工具生成）：**
+
+`add.py`:
+```python
+def add(a, b):
+    return a + b
+```
+
+`test_add.py`:
+```python
+import pytest
+from add import add
+
+def test_add_basic():
+    assert add(1,2)==3
+    assert add(10,20)==30
+    assert add(123,456)==579
+    assert add(7,8)==15
+```
+
+**Claude Code 独立验收（不修改生成文件）：**
+```bash
+python -m pytest /tmp/aegis-e2e-0h162mbh -q
+# 输出：1 passed in 0.00s
+```
+1 个测试函数 `test_add_basic` 包含全部 4 条必需断言，pytest 全部通过。无文件修改。
+
+**验收结论：** SPEC 附录 B §七/B.8 全部完成条件满足——真实 Provider 驱动、Harness 工具创建文件、动作经解析→治理→工具分发、pytest 进入 Harness 且 COMPLETED 依赖 pytest 通过、工作区外无副作用、日志无 Secret。
