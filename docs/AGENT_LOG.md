@@ -686,3 +686,15 @@ python -m pytest /tmp/aegis-e2e-0h162mbh -q
 1 个测试函数 `test_add_basic` 包含全部 4 条必需断言，pytest 全部通过。无文件修改。
 
 **验收结论：** SPEC 附录 B §七/B.8 全部完成条件满足——真实 Provider 驱动、Harness 工具创建文件、动作经解析→治理→工具分发、pytest 进入 Harness 且 COMPLETED 依赖 pytest 通过、工作区外无副作用、日志无 Secret。
+
+### 追加改进 B.9：收尾引导 + e2e 可观测性（首次真实运行反馈，2026-07-17）
+
+**触发**：首次人工真实运行（DeepSeek）暴露两点——模型测试通过后不 `finish`、反复重写相同 `add.py` → NO_PROGRESS 停机 → FAILED（治理/审批/反馈/停机全部正确工作，问题是真实模型不知道该收尾）；且 e2e 脚本只打印 5 个 PASS/FAIL 符号，全过程不可见。
+
+**T39（`8043e86` + 测试修正 `e563e97`）**：`PromptBuilder.system_prompt` 增补两条引导——「不要重复已成功的动作（harness 判 NO_PROGRESS 停机）」「测试通过后下一步必须 finish」。评审发现首版 rule-2 测试断言（`"finish"`/`"pass"`）是**同义反复**（既有 finish-gate 行已含这两词，删掉 rule-2 测试仍过）——这正是本项目历史上的 test-theater 模式。修正为断言 rule-2 独有子串 `"next action must be"`，并经 mutation 验证（删 rule-2 → 测试 FAIL，恢复 → PASS）。
+
+**T40（`a76141c`）**：`scripts/e2e_real_llm.py` 新增 `format_trace(events)`（逐步：动作/治理判定/反馈/终止原因）+ `print_generated_files(workspace)`，`main()` 在验收摘要前打印二者。`verify()` 5 项布尔契约不变。确定性测试用手搓事件断言渲染。真实事件形状经核实：`get_events` 返回 `payload_json` 为 JSON **字符串**、`event_type` 为 `"EventType.X"`。
+
+**评审**：per-task 均 Spec ✅（T39 首审抓出同义反复测试，修正后通过）。**whole-branch 终审（opus）：READY TO MERGE，0 Critical·Important。** 终审端到端验证脱敏安全——往 `write_file` 的 content 塞入假 `sk-` key，确认 `format_trace` 只打印 path、且 `chain.append` 已脱敏；两测试均 mutation-kill 非 theater。1 Minor（`_payload` 的 `_raw` 分支 format_trace 未渲染，真实路径不可达，判非阻塞）。
+
+**测试**：`make test` → 444 passed（442 基线 + 2 新）；`make demo` → 3/0。
