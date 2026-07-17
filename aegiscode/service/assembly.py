@@ -17,6 +17,7 @@ from aegiscode.llm.mock import MockLLM
 from aegiscode.loop.harness import HarnessCore
 from aegiscode.memory.store import MemoryStore
 from aegiscode.persistence.db import open_db
+from aegiscode.prompt.builder import PromptBuilder
 from aegiscode.service.app_service import ApplicationService, _workspace_hash
 from aegiscode.tools.command_tool import RunCommandTool
 from aegiscode.tools.file_tools import (
@@ -143,6 +144,7 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
     conn = open_db(db_path)
     memory_store = MemoryStore(conn)
     registry = _build_registry(config)
+    prompt_builder = PromptBuilder(config, registry)
     dispatcher = build_dispatcher(config, registry)
     llm = build_llm(config, credential_store)
 
@@ -178,6 +180,7 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
             # Stable per-workspace project scope: same hash the task repo uses
             # (app_service._workspace_hash), so retrieved memory is per project.
             project_id=_workspace_hash(workspace),
+            prompt_builder=prompt_builder,
         )
 
     return ApplicationService(

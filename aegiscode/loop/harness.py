@@ -33,6 +33,7 @@ class HarnessCore:
         cancel_check=None,
         memory_store=None,
         project_id=None,
+        prompt_builder=None,
     ):
         self.llm = llm
         self.dispatcher = dispatcher
@@ -52,6 +53,11 @@ class HarnessCore:
         # True at the top of a turn, the loop stops with CANCELLED. This is the
         # seam T26 ApplicationService uses to cancel a running task.
         self.cancel_check = cancel_check
+        # Optional PromptBuilder (T35/Appendix B). When set, _build derives
+        # system_prompt/tool_protocol from it (with remaining-steps threaded
+        # in); when None, _build keeps the legacy empty-string behavior so
+        # every pre-existing HarnessCore(...) construction is unaffected.
+        self.prompt_builder = prompt_builder
 
     # ------------------------------------------------------------------ #
     # Public entry point                                                   #
@@ -90,7 +96,7 @@ class HarnessCore:
             # never crash the caller; audit INTERNAL_ERROR and stop) ----
             try:
                 # ---- build context & call LLM ----
-                messages = self._build(task_description, recent_steps, last_feedback)
+                messages = self._build(task_description, recent_steps, last_feedback, current_step=c.step)
                 try:
                     raw_text = self._complete_with_retry(messages)
                 except Exception:  # noqa: BLE001
@@ -317,11 +323,19 @@ class HarnessCore:
     # Private helpers                                                      #
     # ------------------------------------------------------------------ #
 
-    def _build(self, task: str, recent_steps: list[dict], last_feedback: str) -> list[dict]:
+    def _build(
+        self, task: str, recent_steps: list[dict], last_feedback: str, current_step: int = 0
+    ) -> list[dict]:
         """Construct the message list to send to the LLM."""
+        if self.prompt_builder is not None:
+            remaining = max(0, self.config.limits.max_steps - current_step)
+            system_prompt = self.prompt_builder.system_prompt(remaining)
+            tool_protocol = self.prompt_builder.tool_protocol()
+        else:
+            system_prompt, tool_protocol = "", ""
         return build_context(
-            system_prompt="",
-            tool_protocol="",
+            system_prompt=system_prompt,
+            tool_protocol=tool_protocol,
             task=task,
             recent_steps=recent_steps,
             last_feedback=last_feedback,
