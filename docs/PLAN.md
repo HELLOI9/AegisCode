@@ -3747,6 +3747,179 @@ git commit -m "feat(e2e): human-triggered make e2e-real-llm harness + offline ve
 
 ---
 
+### Task 39: PromptBuilder 收尾引导（不重复成功动作 + 测试通过即 finish）
+
+**背景：** 首次真实运行（DeepSeek）中，模型测试通过后未 `finish`、反复重写相同 `add.py` → NO_PROGRESS 停机 → FAILED。SPEC 附录 B.9 改进 1。
+
+**Files:**
+- Modify: `aegiscode/prompt/builder.py`（`system_prompt` 增补两条规则）
+- Test: `tests/prompt/test_builder.py`（追加）
+
+**Interfaces:**
+- Consumes: 既有 `PromptBuilder(config, registry).system_prompt(remaining_steps)`。
+- Produces: system_prompt 文本新增"不重复已成功动作"与"测试通过后下一步必须 finish"两条引导。无签名变化。
+
+- [ ] **Step 1: 追加失败测试**
+```python
+# tests/prompt/test_builder.py 追加
+def test_system_prompt_guides_no_repeat_and_finish_after_pass():
+    pb, _ = _pb()
+    sp = pb.system_prompt(remaining_steps=10)
+    low = sp.lower()
+    # 不要重复已成功的动作（NO_PROGRESS 引导）
+    assert "repeat" in low or "重复" in sp
+    assert "no_progress" in low or "no progress" in low or "无进展" in sp
+    # 测试通过后必须 finish
+    assert "finish" in low
+    assert "pass" in low or "通过" in sp
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/prompt/test_builder.py::test_system_prompt_guides_no_repeat_and_finish_after_pass -v`
+Expected: FAIL（当前提示词无"不重复/通过即 finish"引导）。
+
+- [ ] **Step 3: 最小实现** — 在 `system_prompt` 的规则列表里,在现有 "finish only after pytest passes" 之后补两条:
+```python
+# aegiscode/prompt/builder.py — system_prompt() 规则串里追加(示意,保持既有措辞风格)
+            "- Do NOT repeat an action that already succeeded: if a file is "
+            "already written correctly or a command already succeeded, do not "
+            "send it again — the harness flags a repeated identical action as "
+            "NO_PROGRESS and stops the run.\n"
+            "- As soon as the tests objectively pass (pytest exit code 0), your "
+            "next action MUST be `finish` — do not rewrite files that are already "
+            "correct.\n"
+```
+（插入位置：紧接既有"Emit the `finish` action ONLY after the tests objectively pass…"一条之后；两条与既有 no-secret 断言无冲突。）
+
+- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+
+Run: `pytest tests/prompt/test_builder.py -v && pytest -q`
+Expected: 新测试 PASS;全量绿(既有 no-secret / 身份 / 边界 / 工具协议断言不受影响)。
+
+- [ ] **Step 5: 提交**
+```bash
+git add aegiscode/prompt/builder.py tests/prompt/test_builder.py
+git commit -m "feat(prompt): guide no-repeat + finish-after-pass to stabilize real models (Appendix B.9, T39)"
+```
+
+---
+
+### Task 40: e2e 脚本可观测性（逐步轨迹 + 生成文件内容）
+
+**背景：** e2e 只打印 5 个 PASS/FAIL 符号,不展示模型动作/治理判定/失败原因/文件内容。SPEC 附录 B.9 改进 2。
+
+**Files:**
+- Modify: `scripts/e2e_real_llm.py`（新增 `format_trace` / `print_generated_files`，`main` 调用；`verify()` 签名不动）
+- Test: `tests/test_e2e_real_llm_offline.py`（追加 `format_trace` 的确定性测试）
+
+**Interfaces:**
+- Consumes: `service.get_events(task_id, since=0)` 返回的审计事件 dict 列表（键含 `step_index`/`event_type`/`payload_json` 或已解析 `payload`）。
+- Produces:
+  - `format_trace(events: list[dict]) -> str`：逐步文本(动作/治理判定/反馈/终止原因)。
+  - `print_generated_files(workspace: str) -> None`：打印 add.py/test_add.py 内容。
+  - `main()` 在验收摘要前打印二者。`verify()` 的 5 项布尔契约不变（离线测试继续绿）。
+
+- [ ] **Step 1: 追加失败测试**
+```python
+# tests/test_e2e_real_llm_offline.py 追加
+def test_format_trace_renders_actions_governance_and_termination():
+    m = _load()
+    events = [
+        {"step_index": 0, "event_type": "EventType.ACTION_PROPOSED",
+         "payload_json": '{"tool": "write_file", "arguments": {"path": "add.py"}}'},
+        {"step_index": 0, "event_type": "EventType.GOVERNANCE_DECISION",
+         "payload_json": '{"decision": "DENY", "rule": "CMD_RULE_6", "reason": "python -m"}'},
+        {"step_index": 0, "event_type": "EventType.FEEDBACK",
+         "payload_json": '{"category": "POLICY_DENIED", "detail": "x"}'},
+        {"step_index": 1, "event_type": "EventType.TERMINATION",
+         "payload_json": '{"reason": "NO_PROGRESS"}'},
+    ]
+    out = m.format_trace(events)
+    assert "write_file" in out
+    assert "DENY" in out and ("CMD_RULE_6" in out or "python -m" in out)
+    assert "POLICY_DENIED" in out
+    assert "NO_PROGRESS" in out
+    assert "TERMINATION" in out or "终止" in out
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `pytest tests/test_e2e_real_llm_offline.py::test_format_trace_renders_actions_governance_and_termination -v`
+Expected: FAIL — `format_trace` 不存在。
+
+- [ ] **Step 3: 最小实现** — 在 `scripts/e2e_real_llm.py` 新增(实现者需先读文件确认事件 dict 的实际键名——`get_events` 返回的可能是 `payload_json` 字符串或已解析字段;用 `json.loads` 容错解析,键缺失时降级为原始串):
+```python
+import json
+
+def _payload(ev):
+    raw = ev.get("payload_json") or ev.get("payload") or "{}"
+    if isinstance(raw, dict):
+        return raw
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return {"_raw": str(raw)}
+
+def format_trace(events):
+    """Render the audit event stream as a readable per-step trace."""
+    lines = []
+    for ev in events:
+        et = str(ev.get("event_type", "")).replace("EventType.", "")
+        si = ev.get("step_index", "?")
+        p = _payload(ev)
+        if et == "ACTION_PROPOSED":
+            args = p.get("arguments", {})
+            summary = args.get("path") or args.get("command") or args.get("query") or ""
+            lines.append(f"  step{si} ACTION      {p.get('tool','?')}  {summary}")
+        elif et == "GOVERNANCE_DECISION":
+            lines.append(f"  step{si} GOVERNANCE  {p.get('decision','?')} "
+                         f"[{p.get('rule','')}] {p.get('reason','')}")
+        elif et == "APPROVAL_DECIDED":
+            lines.append(f"  step{si} APPROVAL    {p.get('state','?')}")
+        elif et == "TOOL_EXECUTED":
+            lines.append(f"  step{si} TOOL        {p.get('tool','?')} -> {p.get('status','?')}")
+        elif et == "FEEDBACK":
+            lines.append(f"  step{si} FEEDBACK    {p.get('category','?')} {p.get('detail','')}")
+        elif et == "TERMINATION":
+            lines.append(f"  step{si} TERMINATION reason={p.get('reason','?')}")
+    return "\n".join(lines)
+
+def print_generated_files(workspace):
+    import os
+    for fn in ("add.py", "test_add.py"):
+        fp = os.path.join(workspace, fn)
+        print(f"\n----- {fn} -----")
+        if os.path.isfile(fp):
+            with open(fp, encoding="utf-8") as fh:
+                print(fh.read().rstrip())
+        else:
+            print("(not created)")
+```
+然后在 `main()` 里,拿到 `service`+`task_id` 后、打印验收摘要**之前**,插入:
+```python
+    events = service.get_events(task_id, since=0)
+    print("\n===== 执行轨迹 (trace) =====")
+    print(format_trace(events))
+    print("\n===== 生成文件 =====")
+    print_generated_files(workspace)
+    print("\n===== 验收摘要 =====")
+```
+（`run_e2e` 已经 `get_events` 用于治理计数;可复用同一份 events 或让 `main` 重新取。保持 `verify()` 签名与 5 项布尔不变。全程无 Key 输出——事件已脱敏。）
+
+- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+
+Run: `pytest tests/test_e2e_real_llm_offline.py -v && pytest -q`
+Expected: 新测试 + 既有离线守卫 PASS;全量绿。**不实际跑 `make e2e-real-llm`**（需真实 Key,人工触发）。
+
+- [ ] **Step 5: 提交**
+```bash
+git add scripts/e2e_real_llm.py tests/test_e2e_real_llm_offline.py
+git commit -m "feat(e2e): step-by-step trace + generated-file output for real demo (Appendix B.9, T40)"
+```
+
+---
+
 ## Milestone 8 Self-Review
 
 **1. Spec coverage (Appendix B):**
