@@ -42,6 +42,13 @@ class PromptBuilder:
             "- Emit the `finish` action ONLY after the tests objectively pass "
             "(pytest exit code 0); the harness independently re-runs pytest before "
             "accepting completion.\n"
+            "- Do NOT repeat an action that already succeeded: if a file is "
+            "already written correctly or a command already succeeded, do not "
+            "send it again — the harness flags a repeated identical action as "
+            "NO_PROGRESS and stops the run.\n"
+            "- As soon as the tests objectively pass (pytest exit code 0), your "
+            "next action MUST be `finish` — do not rewrite files that are already "
+            "correct.\n"
             f"- You have {remaining_steps} step(s) remaining."
         )
 

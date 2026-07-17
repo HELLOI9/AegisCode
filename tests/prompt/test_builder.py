@@ -55,3 +55,14 @@ def test_prompt_contains_no_secret_material():
     blob = pb.system_prompt(10) + "\n" + pb.tool_protocol()
     for bad in ("sk-", "api_key", "authorization", "bearer"):
         assert bad.lower() not in blob.lower()
+
+def test_system_prompt_guides_no_repeat_and_finish_after_pass():
+    pb, _ = _pb()
+    sp = pb.system_prompt(remaining_steps=10)
+    low = sp.lower()
+    # 不要重复已成功的动作（NO_PROGRESS 引导）
+    assert "repeat" in low or "重复" in sp
+    assert "no_progress" in low or "no progress" in low or "无进展" in sp
+    # 测试通过后必须 finish
+    assert "finish" in low
+    assert "pass" in low or "通过" in sp
