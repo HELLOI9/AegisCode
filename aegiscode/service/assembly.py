@@ -54,7 +54,9 @@ def build_llm(config, credential_store):
     if provider == "anthropic":
         from aegiscode.llm.anthropic_adapter import AnthropicAdapter
 
-        return AnthropicAdapter(model=config.llm.model, api_key=key)
+        return AnthropicAdapter(
+            model=config.llm.model, api_key=key, base_url=config.llm.base_url
+        )
 
     raise NoKeyError(f"unknown llm provider: {provider!r}")
 
