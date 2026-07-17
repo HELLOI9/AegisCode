@@ -4,6 +4,8 @@ from aegiscode.tools.result import ToolResult
 
 class RunTestsTool:
     name = "run_tests"
+    description = "Run the project's configured test command (the objective feedback sensor)."
+    parameters = {}  # takes no arguments; uses configured test_command
     def __init__(self, test_command, timeout_sec, output_max_bytes):
         self.cmd, self.timeout, self.max_bytes = test_command, timeout_sec, output_max_bytes
     def run(self, arguments, ctx):

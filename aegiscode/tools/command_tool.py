@@ -6,6 +6,8 @@ from aegiscode.tools.result import ToolResult
 
 class RunCommandTool:
     name = "run_command"
+    description = "Run an allowlisted shell command (shell=False, argv, cwd locked to workspace)."
+    parameters = {"command": {"type": "string", "required": True, "note": "command string; lexed + allowlist + rule governed"}}
 
     def __init__(self, allowlist, rules, timeout_sec, output_max_bytes):
         self.allowlist = allowlist
