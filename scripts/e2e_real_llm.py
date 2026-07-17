@@ -6,7 +6,7 @@ config, and the real CLI path (build_service → HarnessCore). Proves the harnes
 pytest passing. May incur API cost. Output is redacted (no secret).
 """
 from __future__ import annotations
-import os, shlex, subprocess, sys, tempfile
+import json, os, shlex, subprocess, sys, tempfile
 
 TASK = (
     "In the current workspace create add.py and test_add.py. "
@@ -107,6 +107,57 @@ def governance_evidence(service, task_id):
         "write_file_tool_executed_events": write_file_executed,
     }
 
+def _payload(ev):
+    raw = ev.get("payload_json") or ev.get("payload") or "{}"
+    if isinstance(raw, dict):
+        return raw
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return {"_raw": str(raw)}
+
+def format_trace(events):
+    """Render the audit event stream as a readable per-step trace (SPEC B.9).
+
+    Consumes the dict shape returned by `service.get_events(task_id, since=0)`:
+    each row has `step_index`, `event_type` (the "EventType.X" string form),
+    and `payload_json` (a JSON string). Purely offline/deterministic — never
+    touches a real provider or the network.
+    """
+    lines = []
+    for ev in events:
+        et = str(ev.get("event_type", "")).replace("EventType.", "")
+        si = ev.get("step_index", "?")
+        p = _payload(ev)
+        if et == "ACTION_PROPOSED":
+            args = p.get("arguments", {})
+            summary = args.get("path") or args.get("command") or args.get("query") or ""
+            lines.append(f"  step{si} ACTION      {p.get('tool', '?')}  {summary}")
+        elif et == "GOVERNANCE_DECISION":
+            lines.append(f"  step{si} GOVERNANCE  {p.get('decision', '?')} "
+                         f"[{p.get('rule', '')}] {p.get('reason', '')}")
+        elif et == "APPROVAL_DECIDED":
+            lines.append(f"  step{si} APPROVAL    {p.get('state', '?')}")
+        elif et == "TOOL_EXECUTED":
+            lines.append(f"  step{si} TOOL        {p.get('tool', '?')} -> {p.get('status', '?')}")
+        elif et == "FEEDBACK":
+            lines.append(f"  step{si} FEEDBACK    {p.get('category', '?')} {p.get('detail', '')}")
+        elif et == "TERMINATION":
+            lines.append(f"  step{si} TERMINATION reason={p.get('reason', '?')}")
+    return "\n".join(lines)
+
+def print_generated_files(workspace):
+    """Print add.py/test_add.py contents from the e2e workspace (redacted-safe:
+    these are the harness's own generated output, not credentials)."""
+    for fn in ("add.py", "test_add.py"):
+        fp = os.path.join(workspace, fn)
+        print(f"\n----- {fn} -----")
+        if os.path.isfile(fp):
+            with open(fp, encoding="utf-8") as fh:
+                print(fh.read().rstrip())
+        else:
+            print("(not created)")
+
 def main():
     from aegiscode.config.loader import load_config
     from aegiscode.credentials.backend import build_credential_store
@@ -122,6 +173,12 @@ def main():
           f"credential={'configured' if store.status()['configured'] else 'MISSING'}")
     service, task_id, provider_name, completed, pytest_passed = run_e2e(config, store, workspace)
     checks = verify(workspace, provider_name, completed, pytest_passed)
+    events = service.get_events(task_id, since=0)
+    print("\n===== 执行轨迹 (trace) =====")
+    print(format_trace(events))
+    print("\n===== 生成文件 =====")
+    print_generated_files(workspace)
+    print("\n===== 验收摘要 =====")
     print(f"workspace={workspace}")
     for k, v in checks.items():
         print(f"  {'PASS' if v else 'FAIL'}  {k}")

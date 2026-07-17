@@ -47,3 +47,22 @@ def test_makefile_e2e_target_not_in_test():
     # e2e must NOT be a prerequisite of the test target
     test_line = [l for l in mk.splitlines() if l.startswith("test:")][0]
     assert "e2e" not in test_line
+
+def test_format_trace_renders_actions_governance_and_termination():
+    m = _load()
+    events = [
+        {"step_index": 0, "event_type": "EventType.ACTION_PROPOSED",
+         "payload_json": '{"tool": "write_file", "arguments": {"path": "add.py"}}'},
+        {"step_index": 0, "event_type": "EventType.GOVERNANCE_DECISION",
+         "payload_json": '{"decision": "DENY", "rule": "CMD_RULE_6", "reason": "python -m"}'},
+        {"step_index": 0, "event_type": "EventType.FEEDBACK",
+         "payload_json": '{"category": "POLICY_DENIED", "detail": "x"}'},
+        {"step_index": 1, "event_type": "EventType.TERMINATION",
+         "payload_json": '{"reason": "NO_PROGRESS"}'},
+    ]
+    out = m.format_trace(events)
+    assert "write_file" in out
+    assert "DENY" in out and ("CMD_RULE_6" in out or "python -m" in out)
+    assert "POLICY_DENIED" in out
+    assert "NO_PROGRESS" in out
+    assert "TERMINATION" in out or "终止" in out
