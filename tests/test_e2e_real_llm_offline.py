@@ -1,6 +1,6 @@
 """Offline guard for the e2e harness's VERIFY logic. Never touches a real
 provider or the network — that is the human-triggered `make e2e-real-llm`."""
-import os, subprocess, sys, tempfile, importlib.util, pathlib
+import importlib.util, pathlib
 
 def _load():
     p = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "e2e_real_llm.py"

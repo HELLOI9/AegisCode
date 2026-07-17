@@ -122,7 +122,9 @@ def _make_final_verifier(config, workspace):
     return verify
 
 
-def build_service(config, credential_store, db_path: str, sync: bool = False):
+def build_service(
+    config, credential_store, db_path: str, sync: bool = False, sync_decision_fn=None
+):
     """Assemble a real ApplicationService.
 
     Parameters
@@ -135,6 +137,14 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
     sync : bool
         If True, create_task runs inline (blocking) — used by the CLI so a run
         terminates before the process exits.
+    sync_decision_fn : Callable[[str], bool] | None
+        Sync-mode only: given an approval_id, returns True to approve. Passed
+        straight through to ApplicationService. Defaults to None, which
+        preserves today's production behavior exactly: a sync-mode
+        REQUIRE_APPROVAL with no decision fn auto-rejects (fail closed). The
+        real CLI does not pass this; only trusted callers (e.g. the
+        human-triggered e2e harness standing in for a human clicking
+        "approve") should.
 
     Raises
     ------
@@ -189,4 +199,5 @@ def build_service(config, credential_store, db_path: str, sync: bool = False):
         config=config,
         harness_factory=harness_factory,
         sync=sync,
+        sync_decision_fn=sync_decision_fn,
     )
