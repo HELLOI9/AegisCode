@@ -601,3 +601,31 @@ WebUI: workspace 字段已禁用, value="demo"
 - Demo 成功必须由场景 `success_conditions` 对真实审计流断言判定，**绝不**用 harness 终态：DENY-only 演示天然以 MAX_STEPS→FAILED 终止却全 pass。
 - Demo 3 Web 失效演示复用 `make demo` 同一 `validate_resume`/SUPERSEDED 机制（轮1真人批准、轮2 场景在指纹绑定后改参）——未造 demo 专用伪审批。
 - 已知限制：Render 免费实例休眠丢临时数据；Demo 3 需人工点击（未做自动播放）；单页轮询非 SSE；`chain.py` 预存 `str(EventType)` bug（本分支范围外，读路径归一化）。
+
+---
+
+## [2026-07-17] 追加实现 D：真实 LLM Provider 可用性（Milestone 8 / SPEC 附录 B）
+
+**定位**：课程要求之外的 enhancement。让真实 Provider（OpenAI / Anthropic / OpenAI 兼容端点）能真正驱动 Harness；默认测试仍以 MockLLM 为准,真实 LLM 测试不进 `make test`/普通 CI。**课程从未强制要求真实 LLM 端到端测试。**
+
+**工作流**：brainstorming（分析真实 CLI 失败根因,不改码）→ SPEC 附录 B（用户签字）→ writing-plans（PLAN Milestone 8,T33–T38）→ using-git-worktrees（`worktree-m8-real-provider`,从 origin/main 分叉后 ff 合并本地 SPEC/PLAN 提交,教训5复现并规避）→ subagent-driven-development（每 task 一 implementer + 独立 reviewer,TDD 红-绿-重构）→ requesting-code-review（whole-branch,opus）。
+
+**根因**：`HarnessCore._build()` 以 `system_prompt=""`/`tool_protocol=""` 调 `build_context`。MockLLM 按脚本回放不受影响（419 测试 + 4 演示全绿）,但真实模型只收到任务文本——无身份、无动作 JSON 协议、无工具清单、无 workspace 规则,故散文输出每轮 `INVALID_ACTION` 直至停机,永不建文件。
+
+**实现（T33–T38,均 TDD）**：
+- T33（`7ce3e5e`）：7 个工具类加声明式 `description`/`parameters`,字段名与 `run()` 实读键同源（测试守卫防漂移）。
+- T34（`079f77e`）：`ToolRegistry.describe()` 遍历**已注册**工具渲染规格;禁用工具因未注册结构性缺席。
+- T35（`4f1bdc7`）：Provider 无关 `PromptBuilder(config, registry)` → `system_prompt(remaining_steps)`（身份/无直接 fs·shell/每轮一动作/仅启用工具/从 config 渲染的 workspace 边界+allowlist+command_rules/反馈纪律/pytest 通过前禁 finish/剩余步数）+ `tool_protocol()`（复用既有 Action 协议 + `describe()`）。
+- T36（`5223a0e`）：`PromptBuilder` 作为 `HarnessCore` 可选构造参数注入（默认 None → 空提示词,419 旧测试字节级不变）;`assembly.build_service` 构造并注入。附带修 `ci_secret_scan.py` 行号 allowlist（import 使 assembly.py:44→45）。
+- T37（`96a80d0`）：`AnthropicAdapter` 加可配置 `base_url`（默认 `https://api.anthropic.com`）,`build_llm` 传入 `config.llm.base_url`。
+- T38（`faff3a4` + 修 `281649c`）：人工触发 `make e2e-real-llm`（`scripts/e2e_real_llm.py`,临时工作区,真实 Provider,不进 `make test`/CI,失败非零退出,脱敏输出）+ 离线 verify 守卫。
+
+**reviewer 发现（关键：真实缺陷,评审闭环）**：
+- T38 终审（sonnet）挖出 **1 Critical**：e2e 恒失败——任务在 workspace 根写 `add.py`/`test_add.py`,出厂治理 `write_allowlist_dirs=[src/,tests/]` + `write→REQUIRE_APPROVAL`,而 `build_service` 未暴露 `sync_decision_fn`,sync 模式缺决策函数 → 审批**默认拒绝** → 写被拒 → 文件永不生成 → e2e 无条件 FAIL,恰是需真实 key 故离线守卫抓不到。评审用脚本化良性 LLM 经真实 `build_service` 复现。
+- 修（`281649c`）：`build_service` 暴露 `sync_decision_fn`（透传 `ApplicationService`,默认 None 保持生产"默认拒绝"语义不变）;e2e 传 `lambda _:True` 自动批准（演示完整 HITL 路径:写→REQUIRE_APPROVAL→批准→执行;危险命令是 DENY 非 APPROVAL,自动批准不能绕过 DENY）;新增确定性 MockLLM 回归测试 `test_build_service_sync_approval.py`（Test A 修前 `TypeError` 失败/修后通过,Test B pin 默认拒绝）。修前失败经 reviewer 独立复现,确认 TDD 真实。
+- 其余 T33–T37 per-task 评审均 Spec ✅ / Approved,0 Critical·Important。
+- **whole-branch 终审（opus）：READY TO MERGE,0 Critical·Important。** 独立跑 `pytest -q`=442（确认导入本 worktree 代码）,端到端追踪提示词经两 adapter 送达,验证「无第二套协议」「无密钥入提示词/日志/e2e 输出」「`make test`/CI 隔离」。M-1/M-2/M-3（子串式 omission 测试、边界测试仅测默认、`ci_secret_scan` 行号 allowlist——后者预存）均判非阻塞。新增文档 Minor MIN-1（SPEC B.2 例子把 `rm -rf` 列入 command_rules 渲染,实则 rm 靠 allowlist-absence 拦截）已修。
+
+**本地测试**：`make test` → 442 passed（419 基线 + 23 新,零网络）;`make demo` → 3 passed/0 failed。
+
+**人工干预/协调**：控制器一次 SDD 时序失误——曾误将 T36 叙述为"已评审通过"而其实未运行（T37 因此先落地）。以账本 + `git log` 为准发现并纠正:T37 与 T36 计划无依赖,无损;补跑 T36 真实实现 + 评审,并补 T37 遗漏的评审。教训:严格以进度账本 + git log 为真相源,叙述记忆不可信。真实 LLM 端到端验收见下节 / ACCEPTANCE.md。
