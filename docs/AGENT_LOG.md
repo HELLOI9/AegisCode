@@ -447,8 +447,8 @@
 - **控制器独立复现 + TDD 修复**:分离 fence 混淆的两种威胁——**逃逸**(路径解析到 workspace 外,对**任何**命令都是威胁→恒拒,`git apply /etc/passwd`/`python ../x`/`rm -rf /` 仍拒);**敏感名**(workspace 内、basename 命中 `.env`/`*.pem` 等,仅当命令**把它当文件消费**——python/pytest/ruff/mypy——才是读/执行威胁;git/pip 的裸敏感词 token 是 ref/message/package 非文件访问,不 fence,交策略引擎判定,`python .env`/`key.pem` 仍拒)。另停止 fence argv0(allowlist own 它)。4 条非回归测试,全量 321→325,make demo 3 passed。
 - **Minor(评审记录,未阻塞)**:demo1 docstring 陈旧(`rm -rf /` 现经 `CMD_PATH_FENCE` 拒非 allowlist,已顺手修);两套 demo 入口共存(`make demo` 评分集 / `aegiscode demo` SPEC 集,README §10 已注明,可合并后整合);`ci_secret_scan` 行钉 43→44 已核对无误。
 
-#### CI 补充:GitHub Actions 硬化(2026-07-15 14:43 CST,分支 `chore/github-actions`)
-- **任务**:补充/硬化 GitHub Actions CI(交付增强,非原始 PLAN 遗漏——见 PLAN §「收尾追加任务」)。
+#### GitHub Actions CI:恢复并完成原计划 CI 要求(2026-07-15 14:43 CST,分支 `chore/github-actions`)
+- **任务**:在实际托管平台(GitHub)上补齐并硬化 CI。CI 属**原计划要求**(原始 PLAN 全局约束「CI must contain a job named `unit-test`」、SPEC §5.1「Docker + CI」);首次实施(Task 32)只交付 `.gitlab-ci.yml`,因仓库托管于 GitHub、GitLab pipeline 不自动执行,故此处补齐 GitHub Actions workflow 使 CI 真正运行。**非新增 enhancement,是原计划 CI 要求在真实平台上的完成。**
 - **修改原因**:`.github/workflows/ci.yml` 此前已存在(commit 3698399/8a02d9f,`on: [push, pull_request]`,三 job),但缺 §三 手动触发、§四 最小权限、§五 并发控制、§八 缓存、§九 step 命名。本次在**不改测试真相来源**(仍复用 `make test`/`make demo`,不复制测试逻辑)的前提下补齐。
 - **参考的现有 GitLab CI**:`.gitlab-ci.yml`(stages test/security/build;`unit-test`→`make test`+`make demo`;`secret-scan`→`ci_secret_scan.py`+gitleaks 兜底;`docker-build`→`docker build`)。GitHub Actions 保持同构,job 名 `unit-test` 精确保留(决策 #23)。
 - **新增/修改 workflow 文件**:`.github/workflows/ci.yml`(单文件硬化,未新建重复 workflow)。
@@ -558,9 +558,9 @@ WebUI: workspace 字段已禁用, value="demo"
 
 ---
 
-## [2026-07-15] 追加任务 C：WebUI 预设 MockLLM 演示
+## [2026-07-15] 迭代修改：WebUI 预设 MockLLM 演示（对 Task 28 WebUI 的迭代）
 
-**PLAN task**：追加任务 C（完善 Task 28 WebUI + Render 公网部署（原计划要求）之上的图形化机制演示能力）。
+**性质**：对原 Task 28 已交付 WebUI 的**迭代**（非追加任务、非新能力）——在 Render 公网部署（原计划要求）之上，为三机制增加图形化演示入口，未改变布局 / Harness / API / 治理 / 审批 / Demo 逻辑。
 
 **缺失问题**：公网已部署，`make demo` 可在 MockLLM 下确定性演示三机制，但**部署后的 WebUI 未提供这三个 MockLLM 演示入口**。根因：Demo Mode 下 `assembly.build_llm(provider="mock")` 返回 `MockLLM([])`（空脚本），任何 `POST /tasks` 立即 `MockExhaustedError → LLM_ERROR`；三个 demo 的确定性场景逻辑锁死在 `demos/*.py::run()`，Web 层无法复用；无 Demo API、无共享场景层。
 
@@ -729,7 +729,9 @@ python -m pytest /tmp/aegis-e2e-0h162mbh -q
 
 **交叉一致性检查**：Render 口径 5 文档一致；真实 LLM enhancement 标记 4 文档齐全；高风险表述（追加部署/新增 Render/首次已完成部署/课程要求真实 LLM/真实 LLM 必做/UI 架构重构/所有人工验收均已完成/假模型）全部零命中；无明文 Secret（仅测试桩假密钥 `sk-abcdef…` 与 AWS 官方示例 `AKIAIOSFODNN7EXAMPLE`，`ci_secret_scan` 发行面 0 findings）。
 
-**reviewer 结论**：独立评审（opus，只读）= **DOC ACCEPTANCE: PASS**，0 Critical、0 Important，2 Minor（历史「追加任务 B」标签的可选措辞澄清）。两处 Minor 已按建议补「原计划要求」澄清。
+**reviewer 结论**：独立评审（opus，只读）= **DOC ACCEPTANCE: PASS**，0 Critical、0 Important，2 Minor（旧「Follow-up task」编号标签的可选措辞澄清）。已按建议补「原计划要求」澄清。
+
+**分类二次修正（用户更正后）**：进一步按真实性质重排四项交付——GitHub Actions CI 与 Render 部署均为**原计划要求**（首次未完成/暂缓、后续恢复完成，非追加）；WebUI 预设 Demo 与黑白灰 UI 为**迭代修改**（对已交付功能的完善）；**唯一的追加实现（enhancement）是真实 LLM Provider 可用性**。PLAN 区块由 Follow-up A/B/C 改为按性质三分类的 Item A/B/C + Milestone 8；README §16、ACCEPTANCE 结尾、本文 GitHub Actions 节与 WebUI 节同步对齐。
 
 **人工干预**：控制器直接完成全部文档修订（一次 subagent 因大文件翻译 context 溢出，改由控制器直接逐段编辑）；REFLECTION 处理方式经用户 AskUserQuestion 拍板（填充草稿内容供本人修改）。
 
