@@ -4,7 +4,7 @@
 
 **Goal:** Build AegisCode — a policy-governed coding agent harness whose safety governance is a deterministic, unit-testable, auditable policy engine.
 
-**Architecture:** Self-implemented agent main loop (strict single-action per turn) calling a pluggable `LLMClient`, parsing one structured Action, running it through an ordered first-match policy engine (command lexical governance 甲 + path fence 乙 + HITL approval), dispatching to a small tool registry, classifying objective feedback (pytest/exit-code/file-scope), and re-injecting redacted feedback. Every action is recorded in an append-only SHA256 hash-chained audit stream. WebUI → REST API → Application Service → Harness Core; SQLite persistence; credentials via keyring/.env/env.
+**Architecture:** Self-implemented agent main loop (strict single-action per turn) calling a pluggable `LLMClient`, parsing one structured Action, running it through an ordered first-match policy engine (command lexical governance (A) + path fence (B) + HITL approval), dispatching to a small tool registry, classifying objective feedback (pytest/exit-code/file-scope), and re-injecting redacted feedback. Every action is recorded in an append-only SHA256 hash-chained audit stream. WebUI → REST API → Application Service → Harness Core; SQLite persistence; credentials via keyring/.env/env.
 
 **Tech Stack:** Python 3.12, FastAPI, Pydantic v2, stdlib `sqlite3` (hand-written SQL), pytest, PyYAML, keyring, Docker, native HTML/CSS/JS. LLM via unified `LLMClient` with OpenAIAdapter / AnthropicAdapter / MockLLM.
 
@@ -56,10 +56,10 @@ aegiscode/
   governance/
     decision.py        # Decision enum (T10)
     engine.py          # ordered first-match PolicyEngine (T10)
-    path_fence.py      # 乙 realpath + membership + sensitive blacklist (T11)
+    path_fence.py      # (B) realpath + membership + sensitive blacklist (T11)
     dispatcher.py      # governed dispatcher (path fence + tiers + no-exec on DENY/APPROVAL) (T12)
-    command_lexer.py   # 甲 shlex parse + metastructure detection (T13)
-    command_rules.py   # 甲 allowlist + dangerous-arg rules (T14)
+    command_lexer.py   # (A) shlex parse + metastructure detection (T13)
+    command_rules.py   # (A) allowlist + dangerous-arg rules (T14)
     approval.py        # HITL ApprovalRequest state machine + `fingerprint()` helper (T15)
   feedback/
     classifier.py      # 8-class failure classification + ProgressTracker (T18)
@@ -228,7 +228,7 @@ git commit -m "chore: project scaffold + make test"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `AegisConfig` (Pydantic model, fields per SPEC §11 M11 YAML: `workspace`, `limits`, `tools`, `feedback`, `governance`, `memory`, `credentials`, `llm`) with **`extra="forbid"` on every nested model** (SPEC M11 边界); `CommandRule(BaseModel)` with fields `argv0: str`, `args_contain: list[str] = []`, `decision: Decision` (a `str, Enum` of the four tiers, defined in this task); `DefaultDecisions.readonly/write/command` typed as the same `Decision` enum. `load_config(path: str, env: dict|None=None) -> AegisConfig`: when `env is None`, defaults to `os.environ`; recognizes exactly two overrides — `AEGIS_LLM_PROVIDER` and `AEGIS_LLM_MODEL`; raises `ConfigError` on any invalid YAML or Pydantic validation failure (including unknown fields, wrong types, out-of-enum values).
+- Produces: `AegisConfig` (Pydantic model, fields per SPEC §11 M11 YAML: `workspace`, `limits`, `tools`, `feedback`, `governance`, `memory`, `credentials`, `llm`) with **`extra="forbid"` on every nested model** (SPEC M11 boundary); `CommandRule(BaseModel)` with fields `argv0: str`, `args_contain: list[str] = []`, `decision: Decision` (a `str, Enum` of the four tiers, defined in this task); `DefaultDecisions.readonly/write/command` typed as the same `Decision` enum. `load_config(path: str, env: dict|None=None) -> AegisConfig`: when `env is None`, defaults to `os.environ`; recognizes exactly two overrides — `AEGIS_LLM_PROVIDER` and `AEGIS_LLM_MODEL`; raises `ConfigError` on any invalid YAML or Pydantic validation failure (including unknown fields, wrong types, out-of-enum values).
 
 - [ ] **Step 1: Write the failing test**
 ```python
@@ -1150,7 +1150,7 @@ git commit -m "feat: governance Decision enum + ordered first-match PolicyEngine
 
 ---
 
-### Task 11: Path fence (乙) — realpath ownership + sensitive-file blacklist ✅ DONE (fd91949, +1cde65e)
+### Task 11: Path fence (B) — realpath ownership + sensitive-file blacklist ✅ DONE (fd91949, +1cde65e)
 
 **Files:**
 - Create: `aegiscode/governance/path_fence.py`, `tests/governance/test_path_fence.py`
@@ -1329,7 +1329,7 @@ git commit -m "feat: governed dispatcher (path fence + tiers + no-exec on DENY/A
 
 ---
 
-### Task 13: Command lexer + structure-safety layer (甲, layers 1–2) ✅ DONE (9f1b33c, fix 40bc08c)
+### Task 13: Command lexer + structure-safety layer (A, layers 1–2) ✅ DONE (9f1b33c, fix 40bc08c)
 
 **Files:**
 - Create: `aegiscode/governance/command_lexer.py`, `tests/governance/test_command_lexer.py`
@@ -1405,7 +1405,7 @@ git commit -m "feat: command lexer + structure-safety layer (metastructure -> re
 
 ---
 
-### Task 14: Command allowlist + dangerous-param rules (甲, layers 3–4) ✅ DONE (85a1905, +839ceac)
+### Task 14: Command allowlist + dangerous-param rules (A, layers 3–4) ✅ DONE (85a1905, +839ceac)
 
 **Files:**
 - Create: `aegiscode/governance/command_rules.py`, `tests/governance/test_command_rules.py`
@@ -1605,7 +1605,7 @@ git commit -m "feat: HITL approval state machine + fingerprint supersede + remem
 
 ---
 
-### Task 16: run_command executor tool (甲 layer 5, shell=False) ✅ DONE (b64465b)
+### Task 16: run_command executor tool (A layer 5, shell=False) ✅ DONE (b64465b)
 
 **Files:**
 - Create: `aegiscode/tools/command_tool.py`, `tests/tools/test_command_tool.py`
@@ -2840,71 +2840,71 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 
 ---
 
-## 收尾追加任务(开发完成后的交付增强,非原始计划)
+## Follow-up tasks (delivery enhancements after core completion; NOT part of the original plan)
 
-> 以下条目**不是**原始 32-task 计划的一部分,而是开发/验收阶段的交付增强,如实标注以避免"事后伪造为原计划"。
+> The items below are **not** part of the original 32-task plan, but delivery enhancements made during the development/acceptance phase. They are labeled accurately to avoid "retroactively passing them off as part of the original plan."
 
-### 追加任务 A:GitHub Actions 硬化(分支 `chore/github-actions`)
+### Follow-up task A: GitHub Actions hardening (branch `chore/github-actions`)
 
-- **补充原因**:Task 32 已交付 `.gitlab-ci.yml`(签字 PLAN 主 CI)+ `.github/workflows/ci.yml` 镜像(commit 3698399/8a02d9f),使 CI 在 GitHub-hosted repo 真跑。但该镜像缺 acceptance-spec 后续要求的硬化项:手动触发(`workflow_dispatch`)、最小权限(`permissions: contents: read`)、并发控制(按 ref 分组)、依赖缓存(setup-python pip 缓存)、step 命名。本任务在**不改测试真相来源**(仍复用 `make test`/`make demo`,不复制测试逻辑)前提下补齐。
-- **实现范围**:仅修改 `.github/workflows/ci.yml`(单文件硬化,未新建重复 workflow;`.gitlab-ci.yml` 未动,`unit-test` job 保留);文档更新 README §16(持续集成)、`docs/ACCEPTANCE.md`(GitHub Actions 行)、`docs/AGENT_LOG.md`(CI 补充记录)。
-- **验证结果**:本地 `make test` → 325 passed;`make demo` → 3 passed/0 failed(exit 0);`tests/test_ci_config.py` → 8 passed;`docker build -t aegiscode:ci .` → 成功;两 CI YAML 解析通过。**GitHub 远端运行:✅ 成功**([run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746),三 job 全绿)。
-- **实现 commit**:`bd98d9c`(硬化)+ gitleaks token 修正(见 PR [#10](https://github.com/HELLOI9/AegisCode/pull/10));详见 AGENT_LOG CI 补充记录。
+- **Reason added**: Task 32 already delivered `.gitlab-ci.yml` (the signed-off PLAN's primary CI) plus a `.github/workflows/ci.yml` mirror (commit 3698399/8a02d9f), so CI actually runs on the GitHub-hosted repo. However, that mirror was missing hardening items later required by the acceptance spec: manual trigger (`workflow_dispatch`), least privilege (`permissions: contents: read`), concurrency control (grouped by ref), dependency caching (setup-python pip cache), and step naming. This task fills those gaps **without changing the source of test truth** (still reuses `make test`/`make demo`; test logic is not duplicated).
+- **Scope**: Only `.github/workflows/ci.yml` was modified (single-file hardening; no duplicate workflow was created; `.gitlab-ci.yml` was left untouched and the `unit-test` job is preserved). Docs updated: README §16 (Continuous Integration), `docs/ACCEPTANCE.md` (GitHub Actions row), `docs/AGENT_LOG.md` (CI addendum entry).
+- **Verification results**: Local `make test` → 325 passed; `make demo` → 3 passed/0 failed (exit 0); `tests/test_ci_config.py` → 8 passed; `docker build -t aegiscode:ci .` → succeeded; both CI YAML files parse cleanly. **GitHub remote run: ✅ succeeded** ([run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746), all three jobs green).
+- **Implementation commit**: `bd98d9c` (hardening) + gitleaks token fix (see PR [#10](https://github.com/HELLOI9/AegisCode/pull/10)); see the AGENT_LOG CI addendum entry for details.
 
-### 追加任务 B：Render 公网部署（分支 `deploy/render-web-service`）
+### Follow-up task B: Render public deployment (branch `deploy/render-web-service`)
 
-- **补充原因**：SPEC §13.4 + M14 要求"公网 demo URL"（§清单第 9 条硬性）。原 32-task 计划中 Task 30 仅覆盖 Dockerfile 构建，公网部署从未拆分为独立 task。此前以"核心 Harness 与 CI 优先完成、平台部署暂缓"为由 deferred，ACCEPTANCE 和 README 均标注"公网 URL 待部署"。现恢复执行。
-- **此前暂缓原因**：核心 Harness、治理机制、CI pipeline 优先验收完成；公网部署依赖所有机制就位后再上线。
-- **恢复执行日期**：2026-07-15
-- **实现范围**：
-  - 新增 `render.yaml`（Render Blueprint, Docker, free plan, /healthz, checksPass）
-  - 新增 `/healthz` 端点（`aegiscode/service/api.py`）
-  - 新增 Demo Mode 模块（`aegiscode/service/demo_mode.py`）
-  - 新增 `examples/demo-project/`（受控示例工作区模板）
-  - 新增 `scripts/deploy_check.py` + `make deploy-check` 命令
-  - 修改 `aegiscode/cli.py`（PORT 环境变量适配）
-  - 修改 `aegiscode/config/loader.py`（AEGIS_WORKSPACE_ROOT/ALLOWED_BASE env override）
-  - 修改 `Dockerfile`（$PORT、examples/）
-  - 修改 `pyproject.toml`（testpaths 排除 examples/）
-  - 修改 `aegiscode/service/webui/app.js`（Demo Mode 下隐藏 workspace 输入）
-  - 新增测试：`tests/service/test_healthz.py`、`tests/service/test_demo_mode.py`、`tests/test_deploy_check.py`
-- **TDD**：
-  - Red: /healthz 测试 3 FAIL → Green: 实现端点 → 3 PASS
-  - Red: demo mode 单元测试 → Green: demo_mode.py + API 集成
-  - Red: deploy-check 测试 → Green: 脚本逻辑
-- **验证结果**：
+- **Reason added**: SPEC §13.4 + M14 require a "public demo URL" (checklist item 9, mandatory). In the original 32-task plan, Task 30 only covered the Dockerfile build; public deployment was never broken out as a standalone task. It had been deferred on the grounds of "core Harness and CI finished first, platform deployment postponed", and ACCEPTANCE and README both marked "public URL pending deployment". Now resumed.
+- **Prior deferral reason**: The core Harness, governance mechanisms, and CI pipeline were accepted first; public deployment depends on all mechanisms being in place before going live.
+- **Resumption date**: 2026-07-15
+- **Scope**:
+  - Add `render.yaml` (Render Blueprint, Docker, free plan, /healthz, checksPass)
+  - Add the `/healthz` endpoint (`aegiscode/service/api.py`)
+  - Add the Demo Mode module (`aegiscode/service/demo_mode.py`)
+  - Add `examples/demo-project/` (controlled sample workspace template)
+  - Add `scripts/deploy_check.py` + the `make deploy-check` command
+  - Modify `aegiscode/cli.py` (PORT env-var handling)
+  - Modify `aegiscode/config/loader.py` (AEGIS_WORKSPACE_ROOT/ALLOWED_BASE env override)
+  - Modify `Dockerfile` ($PORT, examples/)
+  - Modify `pyproject.toml` (testpaths excludes examples/)
+  - Modify `aegiscode/service/webui/app.js` (hide the workspace input under Demo Mode)
+  - Add tests: `tests/service/test_healthz.py`, `tests/service/test_demo_mode.py`, `tests/test_deploy_check.py`
+- **TDD**:
+  - Red: /healthz tests 3 FAIL → Green: implement endpoint → 3 PASS
+  - Red: demo mode unit tests → Green: demo_mode.py + API integration
+  - Red: deploy-check tests → Green: script logic
+- **Verification results**:
   - `make test` → 344 passed
   - `make demo` → 3 passed, 0 failed (exit 0)
-  - `docker build -t aegiscode:render .` → 成功
-  - Docker 容器 Demo Mode 验证：/healthz=200, demo workspace 创建成功, 任意路径拒绝, /ui-config 正确
-- **部署状态**：✅ 已完成
-- **实现 commit**：`1cc96cf`（squash merged via PR #11）→ main `d4f5471`
-- **PR**：[#11](https://github.com/HELLOI9/AegisCode/pull/11)（已合并）
-- **公网 URL**：https://aegiscode-o20h.onrender.com
-- **`make deploy-check` 公网结果**：All checks passed（/healthz=200, no secrets, WebUI OK）
-- **人工验收**：✅ 通过（2026-07-15）
+  - `docker build -t aegiscode:render .` → succeeded
+  - Docker container Demo Mode verification: /healthz=200, demo workspace created successfully, arbitrary paths rejected, /ui-config correct
+- **Deployment status**: ✅ Done
+- **Implementation commit**: `1cc96cf` (squash merged via PR #11) → main `d4f5471`
+- **PR**: [#11](https://github.com/HELLOI9/AegisCode/pull/11) (merged)
+- **Public URL**: https://aegiscode-o20h.onrender.com
+- **`make deploy-check` public result**: All checks passed (/healthz=200, no secrets, WebUI OK)
+- **Manual acceptance**: ✅ Passed (2026-07-15)
 
-### 追加任务 C：WebUI 预设 MockLLM 演示（分支 `worktree-webui-mock-demos`）
+### Follow-up task C: WebUI preset MockLLM demos (branch `worktree-webui-mock-demos`)
 
-- **补充原因**：追加任务 B 已完成 Render 公网部署 + Demo Mode + WebUI 可访问，但**部署后的 WebUI 未提供 `make demo` 三项 MockLLM 演示的图形化入口**。原 Task 28（WebUI）只要求「单页 + 事件流 + 审批面板」，追加任务 B 只要求「公网 URL + Demo Mode」，**均未要求图形化机制演示**。本任务在原 task 下如实新增「验收完善项」，为满足公网演示完整性而补充——不伪造本功能早已完成。
-- **此前缺失**：Demo Mode 下 `build_llm(provider="mock")` 返回 `MockLLM([])`（空脚本），任何 `POST /tasks` 立即 LLM_ERROR；三 demo 场景逻辑锁死在 `demos/*.py`，无共享场景层、无 Demo API、WebUI 无演示入口。
-- **恢复执行日期**：2026-07-15
-- **本次完善内容**：
-  - 新增共享场景层 `aegiscode/demo/scenarios.py`（`DemoScenario` 注册表 + `RunOutcome` + `build_run_outcome` + `evaluate`，唯一真相源）
-  - 三个 CLI demo（`demos/demo1/2/3_*.py`）改为消费共享 `mock_script`（`run()` 契约不变，literal-anchor 防漂移）
-  - 新增场景执行器 `aegiscode/demo/service.py::DemoRunManager`（每 run 独立临时工作区 + 独立 MockLLM + 真 HarnessCore，复用 `ApplicationService`）
-  - 新增 Demo API（`aegiscode/service/api.py`：`GET /demos`、`POST /demos/{id}/run`、`GET /demos/runs/{id}`；审批复用既有 `/approvals/{id}/decision`）
-  - 新增 WebUI 预设演示面板（`aegiscode/service/webui/{index.html,app.js,style.css}`：三卡片 + 时间线 + 治理标签 + 审批面板 + 验收摘要 + 重跑；验收判定源自 `success_conditions`，非 HTTP 200）
-  - demo-aware serve 装配（`aegiscode/cli.py::build_serve_app`）
-  - `scripts/deploy_check.py` 新增非破坏性 `check_demos_listed`（demo 模式门控，不跑完整 Demo 3）
-- **新增测试**：75 个（scenarios 38 / cli-uses-registry 4 / run_manager 8 / demo_api 8 / webui 6 / cli-web-consistency 5 / serve-wiring 3 / deploy_check 3）；`make test` 344→**419 passed**（webui 含选择器改造后的 6 个 served-file 断言）。CLI/Web 一致性测试确保无「前端成功而 `make demo` 失败」分叉。
-- **TDD**：每任务 RED→GREEN；I-1/M-1 修复测试经 mutation→RED 验证。
-- **验证结果**：`make test` → 419 passed；`make demo` → 3 passed/0 failed；`docker build -t aegiscode:web-demo .` OK；本地 Docker Demo Mode 容器 HTTP 实测三项 Demo 全通过（Demo1 0 执行全验收、Demo2 COMPLETED、Demo3 真实人工审批 + SUPERSEDED），无路径/密钥泄漏、无未处理异常、400/404 正确。
-- **评审**：每任务两阶段评审 + whole-branch 终审（opus）= ✅ MERGE，0 Critical、1 Important（I-1，已闭环）+ 4 Minor（M-1 已闭环；M-2/M-4 预存/范围外；M-3 安全降级）。
-- **实现 commit**：分支 `worktree-webui-mock-demos`（`6bc4d86`→`cdec3fd`；含用户反馈后把入口从三卡片改为 §十六 Workspace-path 下拉选择器 + 自动填充 `a8eac20`）
-- **PR**：[#12](https://github.com/HELLOI9/AegisCode/pull/12)（已合并，squash → main `fb7029f`）
-- **Render deploy**：✅ 已重部署（main `fb7029f`，https://aegiscode-o20h.onrender.com）
-- **公网人工验收结果**：✅ **通过（2026-07-16）**——公网 `/healthz` mode=demo、`/ui-config` demo_mode=true、`/demos`=200,Workspace-path 下拉可选 demo1/2/3、选中自动填充 task description、三项 Demo 人工点击(含 Demo 3 审批交互)均正常,未发现问题。
+- **Reason added**: Follow-up task B completed the Render public deployment + Demo Mode + an accessible WebUI, but **the deployed WebUI provided no graphical entry point for the three `make demo` MockLLM demos**. The original Task 28 (WebUI) only required "single page + event stream + approval panel", and follow-up task B only required "public URL + Demo Mode"; **neither required a graphical mechanism demo**. This task faithfully adds an "acceptance completion item" under the original task to satisfy public-demo completeness — not pretending this feature was already done.
+- **Prior gap**: Under Demo Mode, `build_llm(provider="mock")` returned `MockLLM([])` (empty script), so any `POST /tasks` immediately hit LLM_ERROR; the three demo scenarios were hard-coded in `demos/*.py`, with no shared scenario layer, no Demo API, and no WebUI demo entry point.
+- **Resumption date**: 2026-07-15
+- **Work in this completion**:
+  - Add a shared scenario layer `aegiscode/demo/scenarios.py` (`DemoScenario` registry + `RunOutcome` + `build_run_outcome` + `evaluate`, single source of truth)
+  - The three CLI demos (`demos/demo1/2/3_*.py`) now consume the shared `mock_script` (`run()` contract unchanged, literal-anchor guards against drift)
+  - Add a scenario runner `aegiscode/demo/service.py::DemoRunManager` (per-run isolated temp workspace + isolated MockLLM + real HarnessCore, reusing `ApplicationService`)
+  - Add the Demo API (`aegiscode/service/api.py`: `GET /demos`, `POST /demos/{id}/run`, `GET /demos/runs/{id}`; approval reuses the existing `/approvals/{id}/decision`)
+  - Add the WebUI preset demo panel (`aegiscode/service/webui/{index.html,app.js,style.css}`: three cards + timeline + governance tags + approval panel + acceptance summary + re-run; acceptance is decided by `success_conditions`, not HTTP 200)
+  - demo-aware serve assembly (`aegiscode/cli.py::build_serve_app`)
+  - `scripts/deploy_check.py` gains a non-destructive `check_demos_listed` (demo-mode gated, does not run the full Demo 3)
+- **New tests**: 75 (scenarios 38 / cli-uses-registry 4 / run_manager 8 / demo_api 8 / webui 6 / cli-web-consistency 5 / serve-wiring 3 / deploy_check 3); `make test` 344→**419 passed** (webui includes 6 served-file assertions after the selector rework). The CLI/Web consistency test ensures there is no "front-end succeeds while `make demo` fails" divergence.
+- **TDD**: RED→GREEN per task; I-1/M-1 fix tests verified via mutation→RED.
+- **Verification results**: `make test` → 419 passed; `make demo` → 3 passed/0 failed; `docker build -t aegiscode:web-demo .` OK; local Docker Demo Mode container HTTP test of all three Demos passed (Demo1 0-execution full acceptance, Demo2 COMPLETED, Demo3 real manual approval + SUPERSEDED), with no path/secret leaks, no unhandled exceptions, and correct 400/404.
+- **Review**: two-stage review per task + whole-branch final review (opus) = ✅ MERGE, 0 Critical, 1 Important (I-1, closed) + 4 Minor (M-1 closed; M-2/M-4 pre-existing/out of scope; M-3 security downgrade).
+- **Implementation commit**: branch `worktree-webui-mock-demos` (`6bc4d86`→`cdec3fd`; includes, after user feedback, changing the entry from three cards to the §16 Workspace-path dropdown selector + auto-fill `a8eac20`)
+- **PR**: [#12](https://github.com/HELLOI9/AegisCode/pull/12) (merged, squash → main `fb7029f`)
+- **Render deploy**: ✅ re-deployed (main `fb7029f`, https://aegiscode-o20h.onrender.com)
+- **Public manual acceptance result**: ✅ **Passed (2026-07-16)** — public `/healthz` mode=demo, `/ui-config` demo_mode=true, `/demos`=200, the Workspace-path dropdown offers demo1/2/3, selecting one auto-fills the task description, and all three Demos worked under manual clicks (including the Demo 3 approval interaction), with no issues found.
 
 ---
 
@@ -2952,7 +2952,7 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 ## Self-Review
 
 **1. Spec coverage** — each SPEC module maps to task(s):
-M1 主循环→T22,T23 · M2 LLM→T5,T6 · M3 动作协议→T7 · M4 工具分发→T8,T9,T16,T17 · M5 治理甲→T13,T14,T16 · M6 治理乙→T11,T12 · M7 审批→T15 · M8 审计→T19 · M9 反馈→T18 · M10 记忆→T20,T21 · M11 配置→T2 · M12 凭据→T24,T25 · M13 WebUI/API→T26,T27,T28 · M14 分发→T30 · M15 演示→T31. Governance engine core→T10. CI (§16.3/清单6)→T32. Golden path (§4)→T23 demo②. Four demos (§16.4)→T31. **No uncovered SPEC module.**
+M1 main loop→T22,T23 · M2 LLM→T5,T6 · M3 action protocol→T7 · M4 tool dispatch→T8,T9,T16,T17 · M5 governance (A)→T13,T14,T16 · M6 governance (B)→T11,T12 · M7 approval→T15 · M8 audit→T19 · M9 feedback→T18 · M10 memory→T20,T21 · M11 config→T2 · M12 credentials→T24,T25 · M13 WebUI/API→T26,T27,T28 · M14 distribution→T30 · M15 demos→T31. Governance engine core→T10. CI (§16.3/checklist item 6)→T32. Golden path (§4)→T23 demo②. Four demos (§16.4)→T31. **No uncovered SPEC module.**
 
 **2. Placeholder scan** — every code step contains real code or an explicit named-signature description (T23/T26/T27/T28/T29/T31 steps 3 reference exact functions/endpoints defined in their Interfaces block). No "TBD/TODO/handle edge cases".
 
@@ -3747,41 +3747,41 @@ git commit -m "feat(e2e): human-triggered make e2e-real-llm harness + offline ve
 
 ---
 
-### Task 39: PromptBuilder 收尾引导（不重复成功动作 + 测试通过即 finish）
+### Task 39: PromptBuilder finish guidance (no-repeat of succeeded actions + finish once tests pass)
 
-**背景：** 首次真实运行（DeepSeek）中，模型测试通过后未 `finish`、反复重写相同 `add.py` → NO_PROGRESS 停机 → FAILED。SPEC 附录 B.9 改进 1。
+**Background:** In the first real run (DeepSeek), after the tests passed the model did not `finish` and instead repeatedly rewrote the same `add.py` → NO_PROGRESS termination → FAILED. SPEC Appendix B.9 improvement 1.
 
 **Files:**
-- Modify: `aegiscode/prompt/builder.py`（`system_prompt` 增补两条规则）
-- Test: `tests/prompt/test_builder.py`（追加）
+- Modify: `aegiscode/prompt/builder.py` (`system_prompt` gains two rules)
+- Test: `tests/prompt/test_builder.py` (append)
 
 **Interfaces:**
-- Consumes: 既有 `PromptBuilder(config, registry).system_prompt(remaining_steps)`。
-- Produces: system_prompt 文本新增"不重复已成功动作"与"测试通过后下一步必须 finish"两条引导。无签名变化。
+- Consumes: the existing `PromptBuilder(config, registry).system_prompt(remaining_steps)`.
+- Produces: the system_prompt text gains two guidance rules — "do not repeat an already-succeeded action" and "once the tests pass the next action must be finish". No signature change.
 
-- [ ] **Step 1: 追加失败测试**
+- [ ] **Step 1: Append the failing test**
 ```python
-# tests/prompt/test_builder.py 追加
+# append to tests/prompt/test_builder.py
 def test_system_prompt_guides_no_repeat_and_finish_after_pass():
     pb, _ = _pb()
     sp = pb.system_prompt(remaining_steps=10)
     low = sp.lower()
-    # 不要重复已成功的动作（NO_PROGRESS 引导）
-    assert "repeat" in low or "重复" in sp
-    assert "no_progress" in low or "no progress" in low or "无进展" in sp
-    # 测试通过后必须 finish
+    # do not repeat an already-succeeded action (NO_PROGRESS guidance)
+    assert "repeat" in low
+    assert "no_progress" in low or "no progress" in low
+    # must finish once the tests pass
     assert "finish" in low
-    assert "pass" in low or "通过" in sp
+    assert "pass" in low
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `pytest tests/prompt/test_builder.py::test_system_prompt_guides_no_repeat_and_finish_after_pass -v`
-Expected: FAIL（当前提示词无"不重复/通过即 finish"引导）。
+Expected: FAIL (the current prompt has no "no-repeat / finish-once-passed" guidance).
 
-- [ ] **Step 3: 最小实现** — 在 `system_prompt` 的规则列表里,在现有 "finish only after pytest passes" 之后补两条:
+- [ ] **Step 3: Minimal implementation** — in the `system_prompt` rule list, add two rules right after the existing "finish only after pytest passes":
 ```python
-# aegiscode/prompt/builder.py — system_prompt() 规则串里追加(示意,保持既有措辞风格)
+# aegiscode/prompt/builder.py — append to the system_prompt() rule string (illustrative, keep the existing wording style)
             "- Do NOT repeat an action that already succeeded: if a file is "
             "already written correctly or a command already succeeded, do not "
             "send it again — the harness flags a repeated identical action as "
@@ -3790,14 +3790,14 @@ Expected: FAIL（当前提示词无"不重复/通过即 finish"引导）。
             "next action MUST be `finish` — do not rewrite files that are already "
             "correct.\n"
 ```
-（插入位置：紧接既有"Emit the `finish` action ONLY after the tests objectively pass…"一条之后；两条与既有 no-secret 断言无冲突。）
+(Insertion point: right after the existing "Emit the `finish` action ONLY after the tests objectively pass…" rule; the two rules do not conflict with the existing no-secret assertion.)
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [ ] **Step 4: Run the tests to confirm they pass + full regression**
 
 Run: `pytest tests/prompt/test_builder.py -v && pytest -q`
-Expected: 新测试 PASS;全量绿(既有 no-secret / 身份 / 边界 / 工具协议断言不受影响)。
+Expected: new test PASS; full suite green (existing no-secret / identity / boundary / tool-protocol assertions unaffected).
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 ```bash
 git add aegiscode/prompt/builder.py tests/prompt/test_builder.py
 git commit -m "feat(prompt): guide no-repeat + finish-after-pass to stabilize real models (Appendix B.9, T39)"
@@ -3805,24 +3805,24 @@ git commit -m "feat(prompt): guide no-repeat + finish-after-pass to stabilize re
 
 ---
 
-### Task 40: e2e 脚本可观测性（逐步轨迹 + 生成文件内容）
+### Task 40: e2e script observability (step-by-step trace + generated file contents)
 
-**背景：** e2e 只打印 5 个 PASS/FAIL 符号,不展示模型动作/治理判定/失败原因/文件内容。SPEC 附录 B.9 改进 2。
+**Background:** the e2e script only printed 5 PASS/FAIL symbols and showed none of the model actions / governance decisions / failure reason / file contents. SPEC Appendix B.9 improvement 2.
 
 **Files:**
-- Modify: `scripts/e2e_real_llm.py`（新增 `format_trace` / `print_generated_files`，`main` 调用；`verify()` 签名不动）
-- Test: `tests/test_e2e_real_llm_offline.py`（追加 `format_trace` 的确定性测试）
+- Modify: `scripts/e2e_real_llm.py` (add `format_trace` / `print_generated_files`, called by `main`; `verify()` signature unchanged)
+- Test: `tests/test_e2e_real_llm_offline.py` (append a deterministic test for `format_trace`)
 
 **Interfaces:**
-- Consumes: `service.get_events(task_id, since=0)` 返回的审计事件 dict 列表（键含 `step_index`/`event_type`/`payload_json` 或已解析 `payload`）。
+- Consumes: the audit-event dict list returned by `service.get_events(task_id, since=0)` (keys include `step_index`/`event_type`/`payload_json`, or an already-parsed `payload`).
 - Produces:
-  - `format_trace(events: list[dict]) -> str`：逐步文本(动作/治理判定/反馈/终止原因)。
-  - `print_generated_files(workspace: str) -> None`：打印 add.py/test_add.py 内容。
-  - `main()` 在验收摘要前打印二者。`verify()` 的 5 项布尔契约不变（离线测试继续绿）。
+  - `format_trace(events: list[dict]) -> str`: per-step text (action / governance decision / feedback / termination reason).
+  - `print_generated_files(workspace: str) -> None`: print the contents of add.py/test_add.py.
+  - `main()` prints both before the acceptance summary. `verify()`'s 5 boolean contract is unchanged (the offline test stays green).
 
-- [ ] **Step 1: 追加失败测试**
+- [ ] **Step 1: Append the failing test**
 ```python
-# tests/test_e2e_real_llm_offline.py 追加
+# append to tests/test_e2e_real_llm_offline.py
 def test_format_trace_renders_actions_governance_and_termination():
     m = _load()
     events = [
@@ -3840,15 +3840,15 @@ def test_format_trace_renders_actions_governance_and_termination():
     assert "DENY" in out and ("CMD_RULE_6" in out or "python -m" in out)
     assert "POLICY_DENIED" in out
     assert "NO_PROGRESS" in out
-    assert "TERMINATION" in out or "终止" in out
+    assert "TERMINATION" in out
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `pytest tests/test_e2e_real_llm_offline.py::test_format_trace_renders_actions_governance_and_termination -v`
-Expected: FAIL — `format_trace` 不存在。
+Expected: FAIL — `format_trace` does not exist.
 
-- [ ] **Step 3: 最小实现** — 在 `scripts/e2e_real_llm.py` 新增(实现者需先读文件确认事件 dict 的实际键名——`get_events` 返回的可能是 `payload_json` 字符串或已解析字段;用 `json.loads` 容错解析,键缺失时降级为原始串):
+- [ ] **Step 3: Minimal implementation** — add to `scripts/e2e_real_llm.py` (the implementer should first read the file to confirm the actual event dict keys — `get_events` may return `payload_json` as a string or already-parsed fields; parse tolerantly with `json.loads`, degrading to the raw string when keys are missing):
 ```python
 import json
 
@@ -3896,23 +3896,23 @@ def print_generated_files(workspace):
         else:
             print("(not created)")
 ```
-然后在 `main()` 里,拿到 `service`+`task_id` 后、打印验收摘要**之前**,插入:
+Then in `main()`, after obtaining `service`+`task_id` and **before** printing the acceptance summary, insert:
 ```python
     events = service.get_events(task_id, since=0)
-    print("\n===== 执行轨迹 (trace) =====")
+    print("\n===== EXECUTION TRACE =====")
     print(format_trace(events))
-    print("\n===== 生成文件 =====")
+    print("\n===== GENERATED FILES =====")
     print_generated_files(workspace)
-    print("\n===== 验收摘要 =====")
+    print("\n===== ACCEPTANCE SUMMARY =====")
 ```
-（`run_e2e` 已经 `get_events` 用于治理计数;可复用同一份 events 或让 `main` 重新取。保持 `verify()` 签名与 5 项布尔不变。全程无 Key 输出——事件已脱敏。）
+(`run_e2e` already calls `get_events` for the governance counts; reuse the same events or have `main` fetch them again. Keep `verify()`'s signature and 5 booleans unchanged. No key is ever printed — events are already redacted.)
 
-- [ ] **Step 4: 跑测试确认通过 + 全量回归**
+- [ ] **Step 4: Run the tests to confirm they pass + full regression**
 
 Run: `pytest tests/test_e2e_real_llm_offline.py -v && pytest -q`
-Expected: 新测试 + 既有离线守卫 PASS;全量绿。**不实际跑 `make e2e-real-llm`**（需真实 Key,人工触发）。
+Expected: new test + existing offline guard PASS; full suite green. **Do NOT actually run `make e2e-real-llm`** (needs a real key, human-triggered).
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 ```bash
 git add scripts/e2e_real_llm.py tests/test_e2e_real_llm_offline.py
 git commit -m "feat(e2e): step-by-step trace + generated-file output for real demo (Appendix B.9, T40)"
