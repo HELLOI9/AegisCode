@@ -12,4 +12,19 @@ __pycache__/
 .mypy_cache/
 venv/
 *.pem
-*.key.superpowers/
+*.key
+.superpowers/
+
+# build / packaging artifacts
+dist/
+build/
+
+# tooling caches & coverage
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# logs & OS cruft
+*.log
+.DS_Store
