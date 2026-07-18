@@ -612,7 +612,7 @@ harness 每个核心机制（工具分发、治理拦截、反馈回灌、记忆
 
 ---
 
-## 附录 B：真实 Provider 可用性（课程要求之外的追加实现 / Enhancement）
+## 附录 B：真实 LLM Provider 可用性（课程要求之外的追加实现 / Enhancement）
 
 > **定位声明（重要）**：本附录描述的能力是**课程要求之外的追加实现（enhancement）**。课程评分口径（§A.4C）只要求"移除真实 LLM 后每个核心机制可用 MockLLM/stub 确定性单测验证"，AegisCode 主体已满足。**课程从未强制要求真实 LLM 端到端测试。** 本附录让真实 Provider（OpenAI / Anthropic / OpenAI 兼容端点如 DeepSeek/通义/vLLM）能够真正驱动 Harness 完成编码任务；默认测试仍以 MockLLM 为准，真实 LLM 测试不进入 `make test` 与普通 CI。
 

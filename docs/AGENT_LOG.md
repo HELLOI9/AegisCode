@@ -468,10 +468,10 @@
 
 ---
 
-## 追加任务 B：Render 公网部署
+## Render 公网部署（恢复并完成原计划要求）
 
 - **时间戳**:2026-07-15
-- **对应 PLAN task**：追加任务 B（SPEC §13.4 + M14 公网 demo URL）
+- **性质**：原计划范围内的要求(SPEC §13.4 + M14 公网 demo URL,「清单第 9 条硬性」),首次实施阶段未拆分为独立任务而**暂缓**,此处**恢复并完成**该原计划要求；非新增 enhancement。
 - **此前暂缓原因**：核心 Harness、治理机制、CI pipeline 优先验收；公网部署依赖全部机制就位
 - **恢复执行时间**：2026-07-15
 - **Superpowers Skill**：using-git-worktrees + executing-plans
@@ -560,7 +560,7 @@ WebUI: workspace 字段已禁用, value="demo"
 
 ## [2026-07-15] 追加任务 C：WebUI 预设 MockLLM 演示
 
-**PLAN task**：追加任务 C（完善 Task 28 WebUI + 追加任务 B Render 公网演示的图形化机制演示能力）。
+**PLAN task**：追加任务 C（完善 Task 28 WebUI + Render 公网部署（原计划要求）之上的图形化机制演示能力）。
 
 **缺失问题**：公网已部署，`make demo` 可在 MockLLM 下确定性演示三机制，但**部署后的 WebUI 未提供这三个 MockLLM 演示入口**。根因：Demo Mode 下 `assembly.build_llm(provider="mock")` 返回 `MockLLM([])`（空脚本），任何 `POST /tasks` 立即 `MockExhaustedError → LLM_ERROR`；三个 demo 的确定性场景逻辑锁死在 `demos/*.py::run()`，Web 层无法复用；无 Demo API、无共享场景层。
 
@@ -698,3 +698,44 @@ python -m pytest /tmp/aegis-e2e-0h162mbh -q
 **评审**：per-task 均 Spec ✅（T39 首审抓出同义反复测试，修正后通过）。**whole-branch 终审（opus）：READY TO MERGE，0 Critical·Important。** 终审端到端验证脱敏安全——往 `write_file` 的 content 塞入假 `sk-` key，确认 `format_trace` 只打印 path、且 `chain.append` 已脱敏；两测试均 mutation-kill 非 theater。1 Minor（`_payload` 的 `_raw` 分支 format_trace 未渲染，真实路径不可达，判非阻塞）。
 
 **测试**：`make test` → 444 passed（442 基线 + 2 新）；`make demo` → 3/0。
+
+---
+
+## 最终文档统一与交付验收（2026-07-18）
+
+- **时间戳**：2026-07-18 11:04
+- **基线 commit**：`origin/main` = `4fb3883`；本地 `main` = `120ebf2`（领先 origin 1 个提交：PLAN 中文段落译英）
+- **性质**：仅文档统一、语言修订与交付验收，不新增功能，不改 Harness Core / WebUI / 测试 / CI/CD / 部署逻辑。
+- **检查的文档**：`SPEC.md`、`PLAN.md`、`SPEC_PROCESS.md`、`AGENT_LOG.md`、`ACCEPTANCE.md`、`README.md`、`REFLECTION.md`。
+
+**先建立事实基线**：以 git 历史/PR、实际代码、`pytest`/`make demo` 实跑、CI/Docker/Render 配置为准，核对原始 SPEC/PLAN 首版（`fc020a7`）。关键事实：原始 SPEC §13.4 已把「公网 demo URL」列为「清单第 9 条硬性」，M14 验收含「云端 demo URL 可访问」；但原始 PLAN Task 30 仅为「Dockerfile + keyring fallback」，公网部署未拆为独立任务。真实 LLM Provider 首版仅有可注入抽象 + MockLLM + Adapter 框架。
+
+**发现的事实矛盾（修订前）**：
+- Render 口径矛盾：PLAN「Follow-up tasks」区块标题声称「NOT part of the original plan」，与 Render 属原 SPEC 范围冲突。
+- 测试计数陈旧：ACCEPTANCE 通篇 419、Milestone 8 段落 442，实际当前 444。
+- ACCEPTANCE 开头仍引用已删除的 worktree `webui-mock-demos` 作「当前」基线。
+- SPEC 附录 B 标题的「（课程要求之外的追加实现 / Enhancement）」被一处未提交改动删除，削弱 enhancement 标记。
+- README §15「WebUI 未公网部署」与 §12 的公网 URL 自相矛盾。
+
+**Render 时间线修正**：统一为「原计划要求（SPEC §13.4 / M14 硬性）→ 首次暂缓（未拆为独立任务）→ 恢复 → 完成（PR #11 `d4f5471`）」。PLAN 区块标题改为「mixed provenance」并逐项标注来源；PLAN task B、ACCEPTANCE Render 行、AGENT_LOG Render 节、README §16 均对齐；**不改任务编号**，不写成新增 enhancement。
+
+**真实 LLM enhancement 定位修正**：恢复 SPEC 附录 B 标题的 enhancement 标记；ACCEPTANCE 追加 Milestone 8（T33-T40）确定性证据子表；README §16 新增「课程要求与追加实现说明」区分三类交付（课程基础要求 / 原计划交付项 / 追加实现）。全文明确：课程从未强制真实 LLM E2E；真实验证为人工触发，不替代 MockLLM 测试与 `make demo`。
+
+**README 重写摘要**：结构总体保留（已通顺准确），重点修订：修复 §15 与 §12 的公网部署自相矛盾；新增 §16「课程要求与追加实现说明」（三类交付定位）；§7.1 标题与措辞统一为「追加实现 / enhancement」；§15 补充真实模型非确定性说明。命令、URL、端口、Provider 名以实际实现为准，未改动。
+
+**中文语言修订**：统一术语（`Harness Core`/`MockLLM`/`真实 LLM Provider`/`Demo Mode`/`治理引擎`/`审批绑定`）；「暂缓」不写成「取消」，后续补全不写成首次已完成；未把 MockLLM 称为「假模型」，未把追加实现称为课程硬性要求。PLAN 剩余中文段落（Follow-up tasks A/B/C、T39/T40、self-review）此前已译为英文（commit `120ebf2`，hash 集合前后一致）。
+
+**REFLECTION.md 框架创建**：按任务 §五替换为 10 节可填写框架，含「本文由学生本人完成」声明、每节 HTML 注释占位、提交前自查清单；各节填入基于真实事实的草稿内容（经用户确认为「辅助」而非代写），Render/真实 LLM 口径与其余文档一致。个人感受与总结（§10 收获）留空由本人撰写。
+
+**交叉一致性检查**：Render 口径 5 文档一致；真实 LLM enhancement 标记 4 文档齐全；高风险表述（追加部署/新增 Render/首次已完成部署/课程要求真实 LLM/真实 LLM 必做/UI 架构重构/所有人工验收均已完成/假模型）全部零命中；无明文 Secret（仅测试桩假密钥 `sk-abcdef…` 与 AWS 官方示例 `AKIAIOSFODNN7EXAMPLE`，`ci_secret_scan` 发行面 0 findings）。
+
+**reviewer 结论**：独立评审（opus，只读）= **DOC ACCEPTANCE: PASS**，0 Critical、0 Important，2 Minor（历史「追加任务 B」标签的可选措辞澄清）。两处 Minor 已按建议补「原计划要求」澄清。
+
+**人工干预**：控制器直接完成全部文档修订（一次 subagent 因大文件翻译 context 溢出，改由控制器直接逐段编辑）；REFLECTION 处理方式经用户 AskUserQuestion 拍板（填充草稿内容供本人修改）。
+
+**测试结果**：`make test` → **444 passed, 1 warning**（warning 为 starlette/httpx 弃用提示，非本项目代码）；`make demo` → **3 passed, 0 failed (exit 0)**。
+
+**剩余待本人确认项**：
+- `REFLECTION.md` §10「个人收获与总结」留空，其余各节草稿需本人修改润色并确认为个人观点；篇幅扩至 1500～2500 字。
+- 本次文档改动尚未提交/合并到 `origin/main`（等待本人决定是否 push + PR）。
+- `aegis.yaml` 的 `deepseek-chat` 配置为本人本地未提交改动，未纳入本次文档修订。

@@ -116,9 +116,9 @@ export AEGIS_LLM_PROVIDER=mock
 
 `make test` 与 `make demo` 都**不需要真实凭据**。
 
-## 7.1 真实 LLM Provider（课程要求之外的追加能力 / enhancement）
+## 7.1 真实 LLM Provider（课程要求之外的追加实现 / enhancement）
 
-> 详见 `docs/SPEC.md` 附录 B。**课程从未强制要求真实 LLM 端到端测试**;默认与评分仍以 MockLLM 确定性测试为准。此为额外让真实模型可用的增强。
+> 详见 `docs/SPEC.md` 附录 B 与本文件第 16 节。**课程从未强制要求真实 LLM 端到端测试**;默认与评分仍以 MockLLM 确定性测试为准。此为让真实模型可实际驱动 Harness 的追加实现。
 
 配置 `aegis.yaml`(或环境变量 `AEGIS_LLM_PROVIDER`/`AEGIS_LLM_MODEL`)选择真实 Provider:
 
@@ -300,11 +300,36 @@ Dockerfile .dockerignore Makefile pyproject.toml
 
 - 单用户 / 单任务 / 单个本地仓库;**锁定 Python + pytest 单栈**(反馈闭环针对 pytest)。
 - 记忆为 SQLite 最小实现,**无向量库**(type + project_id + 关键词 LIKE + topK)。
-- WebUI **未公网部署**、无鉴权(仅本机);写快照回滚为 v2,当前为 no-op。
+- 本地面板**无鉴权、默认仅绑本机**;公网实例仅以 Demo Mode + MockLLM 运行的受限沙箱形态开放(见第 12 节),不用于真实任务。写快照回滚为 v2,当前为 no-op。
 - 密钥扫描器有意限于 `sk-`/`AKIA`/`KEY=` 等已知格式,非通用密钥探测器。
-- 真实 provider 的单次网络调用有 60s 超时;循环有 wall-clock 超时上限。
+- 真实 Provider 的单次网络调用有 60s 超时;循环有 wall-clock 超时上限。真实模型输出具有非确定性,可能与 MockLLM 的确定性行为不同;真实 LLM 验证为人工触发,不进入 `make test` 与普通 CI。
 
-## 16. 持续集成(CI)
+## 16. 课程要求与追加实现说明
+
+为避免混淆,明确区分三类交付内容的性质:
+
+**课程基础要求(必做,评分核心)**
+
+- 自实现 Agent 主循环(不依赖现成 Agent SDK)、可注入的 LLM 抽象(含 MockLLM 与真实 Provider Adapter)。
+- 六个维度(决策 / 工具 / 记忆 / 治理 / 反馈 / 配置)均有最低实现,**治理为重点深化维度**。
+- **MockLLM 确定性测试 + 三项机制演示**(`make test` / `make demo`)是评分的核心验证手段,全程零网络、无需真实 LLM 与 API Key。
+- Docker 分发 + CI(含名为 `unit-test` 的 job)+ **公网可访问的 demo URL**(SPEC §13.4 / M14「清单第 9 条硬性」)。
+
+**原计划交付项(计划内,首次未完成/暂缓,后续恢复完成)**
+
+- **GitHub Actions CI**:CI 属原计划要求(原始 PLAN 全局约束「CI 必须含名为 `unit-test` 的 job」、SPEC §5.1「Docker + CI」)。首次实施(Task 32)交付了 `.gitlab-ci.yml`;因仓库托管于 GitHub、GitLab pipeline 不会自动执行,后续补齐并硬化了 GitHub Actions workflow(最小权限、并发控制、手动触发、依赖缓存),使 CI 在真实托管平台上运行。这是原计划 CI 要求在实际平台上的完成,非新增 enhancement。
+- **Render 公网部署**:属于原始 SPEC 范围(§13.4 / M14 的公网 demo URL 硬性要求)。首次实施阶段未拆分为独立任务而**暂缓**,后续恢复并完成(`render.yaml`、`/healthz`、Demo Mode、安全沙箱、公网 URL、`make deploy-check`)。这不是新增的 enhancement,而是原计划要求的完成。
+
+**迭代修改(对已交付功能的完善,非新能力)**
+
+- **WebUI 预设 MockLLM 演示**:对原 Task 28 已交付 WebUI 的**迭代**——为三项机制增加图形化入口(复用 `make demo` 同一套场景与成功条件),未改变布局、Harness、API、治理、审批或 Demo 逻辑。
+- **黑白灰 UI 优化**:纯表现层(CSS)迭代,未改变布局、Harness、API、治理、审批或 Demo 逻辑。
+
+**追加实现(enhancement,课程要求之外)**
+
+- **真实 LLM Provider 可用性完善**:这是本项目**唯一**课程要求之外的追加实现。初始版本已具备可注入 LLM 抽象、MockLLM 与真实 Provider Adapter 框架;后续真实 CLI 测试发现,Adapter 虽在,但系统提示词、动态工具协议、上下文构建与错误反馈不足以让真实模型稳定驱动 Harness。因此新增 enhancement,补齐系统提示词、从 Tool Registry 动态生成的工具协议、Provider 请求组装、CLI 真实模式与人工触发的真实端到端验证(见第 7.1 节)。**课程从未强制要求真实 LLM 端到端测试**,该验证为人工触发,不替代 MockLLM 测试与 `make demo`。
+
+## 17. 持续集成(CI)
 
 本项目有两套 CI,共用**同一测试真相来源**(`Makefile` 的 `make test` / `make demo` + `docker build`),不重复实现测试逻辑:
 
@@ -325,7 +350,7 @@ Python 版本在 `pyproject.toml`(`>=3.12`)、Dockerfile(`python:3.12-slim`)、G
 
 > 顶部徽章反映 GitHub Actions 在默认分支 `main` 上的最新运行状态。
 
-## 17. 第三方依赖和许可证
+## 18. 第三方依赖和许可证
 
 本项目代码尚未附带独立 LICENSE 文件(课程作业)。运行期第三方依赖及其许可证:
 

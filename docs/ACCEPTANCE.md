@@ -1,6 +1,10 @@
 # AegisCode — 验收追溯矩阵 (ACCEPTANCE)
 
-本文件把课程验收清单(见 `docs/SPEC.md` §15 与 acceptance spec §十)的每条要求映射到**可定位的真实证据**:实现文件、自动化测试(文件 + 函数名)、演示/证据命令、状态。每个单元格都是可 grep / 可复跑的引用,而非「已完成」空话。基线数据(当前 worktree `webui-mock-demos`,追加任务 C 完成后,root venv 复跑):`make test` → **419 passed, 1 warning**;`make demo`(`python -m demos.run_demos`)→ **3 passed, 0 failed (exit 0)**。(历史基线:`m8-hardening` 曾为 325 passed;追加任务 B Render 部署后 344;追加任务 C 加 75 个演示测试 → 419。下方部分早期行内引用的 325 为当时任务验证时的历史计数,未回改。)
+本文件把课程验收清单(见 `docs/SPEC.md` §15 与 acceptance spec §十)的每条要求映射到**可定位的真实证据**:实现文件、自动化测试(文件 + 函数名)、演示/证据命令、状态。每个单元格都是可 grep / 可复跑的引用,而非「已完成」空话。
+
+**当前基线**(在 `main` 分支复跑,root venv):`make test` → **444 passed, 1 warning**(warning 为 starlette/httpx 弃用提示,非本项目代码);`make demo`(`python -m demos.run_demos`)→ **3 passed, 0 failed (exit 0)**。
+
+**测试计数演进(历史,便于对照)**:M0-M7 核心 32 task 完成时 325 → 任务 B(Render 部署,原计划要求)后 344 → 追加任务 C(75 个演示测试)后 419 → 追加任务 D(真实 LLM Provider,Milestone 8 的 T33-T40)后 **444**。下方矩阵中部分早期行内仍引用当时任务验证时的历史计数(如 325/419),保留为历史事实,不回改。
 
 ---
 
@@ -13,20 +17,20 @@
 | 危险动作拦截(DENY) | `aegiscode/governance/command_rules.py`(`judge_command`,5 层管线)+ `command_lexer.py` + `engine.py` | `tests/governance/test_command_rules.py`(`test_rm_denied_by_metastructure_or_allowlist` / `test_python_dash_c_denied` / `test_pipe_denied`)、`test_command_bypass.py`(`test_c1_python3_dash_m_denied` 等旁路加固) | Demo 1 `demos/demo1_dangerous_denied.py`(`rm -rf /` → DENY,tool 执行次数=0,审计 GOVERNANCE_DECISION=DENY 带 rule_id) | ✅ 通过 |
 | 失败反馈回灌 | `aegiscode/loop/harness.py`(反馈写入下一轮 `last_feedback`/上下文)+ `aegiscode/feedback/classifier.py`(`classify`,`TEST_FAILURE` 等 8 类)+ `pytest_parser.py` | `tests/feedback/test_classifier.py`(`test_classify_test_failure` / `test_summarize_pytest_keeps_failed_names`)、`tests/loop/test_harness.py::test_demo2_failure_feedback_changes_action` | Demo 2 `demos/demo2_feedback_loop.py`(失败反馈进入下一轮 MockLLM messages,轮3 动作≠轮1,COMPLETED 由最终验证复跑判定) | ✅ 通过 |
 | 审批绑定与失效(HITL) | `aegiscode/governance/approval.py`(`fingerprint`、`validate_resume`、`ApprovalState.SUPERSEDED`、`remember`/`check_remembered`) | `tests/governance/test_approval_binding.py`(`test_execute_approved_same_fingerprint_runs` / `test_execute_approved_changed_fingerprint_superseded`)、`tests/loop/test_approval_binding.py`、`tests/governance/test_approval.py` | Demo 3 `demos/demo3_approval_binding.py`(暂停时 0 执行 → 批准执行原始快照 → 改指纹 SUPERSEDED 不执行 → 审计全流程) | ✅ 通过 |
-| 统一测试命令 | `Makefile`(`test:` → `pytest -q`) | 全套 `tests/`(325 passed) | `make test` → 325 passed | ✅ 通过 |
+| 统一测试命令 | `Makefile`(`test:` → `pytest -q`) | 全套 `tests/`(当前 444 passed) | `make test` → 444 passed | ✅ 通过 |
 | 统一演示命令 | `Makefile`(`demo:` → `python -m demos.run_demos`)+ `demos/run_demos.py` | `tests/demos/test_run_demos.py`、`tests/demos/test_demos.py`、`tests/demos/test_demo3_approval_binding.py` | `make demo` → "AegisCode mechanism demos: 3 passed, 0 failed" | ✅ 通过 |
 | 凭据安全(生命周期) | `aegiscode/credentials/store.py`(`CredentialStore` keyring→.env→env,`status` 只返 configured+masked,fail-safe)+ `backend.py`(os.open 0o600)+ `scanner.py`(自写扫描器) | `tests/credentials/test_store.py`(`test_status_masks_never_plaintext` / `test_dotenv_disabled_by_default` / `test_env_fallback`)、`test_scanner.py`(`test_detects_planted_key`)、`test_backend_perms.py` | CLI `aegiscode key set/status/clear`;`scripts/ci_secret_scan.py`(CI security stage);容器内 `/credentials/status`=`{"configured":false,"masked":null}`(AGENT_LOG line 441) | ✅ 通过 |
 | Docker 分发 | `Dockerfile`(python:3.12-slim,editable install,`CMD ["aegiscode","serve","--host","0.0.0.0","--port","8000"]`,key 绝不入镜像)+ `.dockerignore` | `tests/test_docker_build.py`(`test_dockerfile_has_no_key_and_runtime_cmd` / `test_dockerfile_copies_no_secrets` / `test_dockerignore_excludes_secrets_and_cruft`) | `docker build -t aegiscode .`(CI docker-build stage);AGENT_LOG line 439 记录 `docker build -t aegiscode:m8 .` 成功 + `docker run` clean exit 0 | ✅ 通过 |
 | WebUI | `aegiscode/service/webui/{index.html,app.js,style.css}`(原生,无框架)+ `aegiscode/service/api.py`(FileResponse 路由 + 8 JSON 端点) | `tests/service/test_webui_served.py`(`test_root_serves_html` / `test_app_js_served_with_polling_logic` / `test_app_js_renders_changed_files_diff`)、`tests/service/test_api.py` | `aegiscode serve` + Docker run + 公网 https://aegiscode-o20h.onrender.com/ | ✅ 通过 |
 | GitLab CI(`unit-test` job) | `.gitlab-ci.yml`(stages test/security/build;`unit-test` job 跑 `make test` + `make demo`)+ 镜像 `.github/workflows/ci.yml`(GitHub 实际执行) | `tests/test_ci_config.py`(`test_gitlab_ci_has_unit_test_job_running_make_test` / `test_github_actions_mirror_exists_and_runs_make_test` / `test_gitlab_ci_has_security_and_build_jobs`) | `.gitlab-ci.yml` `unit-test` job(未 `\|\| true` 兜底,demo 失败即 fail);secret-scan + docker-build 两 stage | ✅ 通过 |
 | GitHub Actions(补充 CI) | `.github/workflows/ci.yml`(三 job:`unit-test`/`secret-scan`/`docker-build`;`on: push[main]`+`pull_request`+`workflow_dispatch`;`permissions: contents: read`;concurrency 按 ref 分组;setup-python 3.12 + pip 缓存) | `tests/test_ci_config.py::test_github_actions_mirror_exists_and_runs_make_test` | `make test`(325 passed)、`make demo`(3 passed/0 failed, exit 0)、`docker build -t aegiscode:ci .`;MockLLM 零网络无 API Key。**GitHub Actions 远端运行成功**([run 29395515280](https://github.com/HELLOI9/AegisCode/actions/runs/29395515280),commit `7813f79`,三 job 全绿:unit-test/secret-scan/docker-build;初次绿色运行 29395362746@`bd98d9c`),PR [#10](https://github.com/HELLOI9/AegisCode/pull/10) | ✅ 通过 |
-| Render 公网部署 | `render.yaml`(Web Service, Docker, free, /healthz, checksPass) | `tests/test_deploy_check.py`(9 tests) + `tests/service/test_healthz.py`(3 tests) + `tests/service/test_demo_mode.py`(7 tests) | `make deploy-check DEPLOY_URL=https://aegiscode-o20h.onrender.com` → All checks passed | ✅ 通过 |
+| Render 公网部署(原计划要求 SPEC §13.4 / M14「清单第 9 条硬性」;首次暂缓,后续恢复完成) | `render.yaml`(Web Service, Docker, free, /healthz, checksPass) | `tests/test_deploy_check.py`(9 tests) + `tests/service/test_healthz.py`(3 tests) + `tests/service/test_demo_mode.py`(7 tests) | `make deploy-check DEPLOY_URL=https://aegiscode-o20h.onrender.com` → All checks passed;PR #11 `d4f5471` | ✅ 通过 |
 | 健康检查 | `aegiscode/service/api.py::healthz`(`GET /healthz` → `{"status":"ok","service":"aegiscode","mode":"..."}`) | `tests/service/test_healthz.py`(`test_healthz_returns_200` / `test_healthz_does_not_leak_secrets` / `test_healthz_has_mode_field`) | 公网 `https://aegiscode-o20h.onrender.com/healthz` = 200 | ✅ 通过 |
 | Demo Mode | `aegiscode/service/demo_mode.py` + `api.py` 集成 + WebUI `app.js` 前端适配 | `tests/service/test_demo_mode.py`(7 tests: 路径拒绝、demo sentinel、临时工作区创建/清理、/healthz mode 报告) | Docker 容器 Demo Mode: 任意路径 400, demo workspace 创建成功, /ui-config=true | ✅ 通过 |
 | 部署验证命令 | `Makefile::deploy-check` + `scripts/deploy_check.py` | `tests/test_deploy_check.py`(9 tests: healthz/secrets/webui/main 逻辑) | `make deploy-check DEPLOY_URL=https://aegiscode-o20h.onrender.com` → exit 0 | ✅ 通过 |
 | CI/CD 联动 | GitHub Actions CI + Render GitHub Integration (checksPass) | CI pass → Render auto-deploy | Render Service 已连接, PR #11 合并后自动部署成功 | ✅ 通过 |
 
-### WebUI 预设 MockLLM 演示(追加任务 C)
+### WebUI 预设 MockLLM 演示(对 Task 28 WebUI 的迭代)
 
 三个 Demo 复用共享场景层 `aegiscode/demo/scenarios.py`(唯一真相源:相同 id/`mock_script`/`success_conditions`),经 `DemoRunManager`(`aegiscode/demo/service.py`)真实驱动 HarnessCore + MockLLM + 治理 + 反馈 + 审批状态机 + 审计;Demo API 见 `aegiscode/service/api.py`(`GET /demos` / `POST /demos/{id}/run` / `GET /demos/runs/{id}`,审批复用既有 `/approvals/{id}/decision`)。本地基线:`make test` → **419 passed**;`make demo` → **3 passed, 0 failed**。
 
@@ -96,10 +100,31 @@
 
 **E2E RESULT: PASS**（完整脚本输出与生成文件内容见 `docs/AGENT_LOG.md` 「真实 LLM 端到端验收」节）
 
-**Milestone 8 自动测试（零网络）：** `make test` → **442 passed**（419 基线 + 23 新）；`make demo` → **3 passed, 0 failed**
+### Milestone 8 追加实现的确定性证据（零网络，进入 `make test`）
+
+真实 LLM Provider 的 enhancement 本身以确定性单测覆盖(不依赖真实网络);真实端到端仅作人工触发验证,不进入 `make test` 与普通 CI。
+
+| 验收项 | 实现位置 | 自动测试 | 状态 |
+|---|---|---|---|
+| 系统提示词(身份/工作区边界/一次一动作/pytest 通过前禁 finish) | `aegiscode/prompt/builder.py::PromptBuilder.system_prompt` | `tests/prompt/test_builder.py`(身份/边界/无 Secret/收尾引导断言) | ✅ 通过 |
+| 工具协议从 Tool Registry 动态生成(禁用工具不暴露) | `aegiscode/tools/registry.py::ToolRegistry.describe` + 各工具 `description`/`parameters` | `tests/tools/test_registry_describe.py`、`tests/tools/test_tool_metadata.py` | ✅ 通过 |
+| Provider 请求组装(system prompt 传递 + 可配 base_url) | `aegiscode/llm/openai_adapter.py`、`anthropic_adapter.py`、`assembly.py::build_llm` | `tests/llm/test_adapters.py`(system 传递 / base_url 默认与自定义) | ✅ 通过 |
+| 收尾引导(不重复成功动作 + 测试通过即 finish) | `aegiscode/prompt/builder.py`(T39,SPEC 附录 B.9) | `tests/prompt/test_builder.py::test_system_prompt_guides_no_repeat_and_finish_after_pass`(mutation 验证非同义反复) | ✅ 通过 |
+| e2e 可观测性(逐步轨迹 + 生成文件) | `scripts/e2e_real_llm.py::format_trace`/`print_generated_files`(T40) | `tests/test_e2e_real_llm_offline.py`(离线守卫,零网络) | ✅ 通过 |
+| CLI 真实模式可选 + 默认不触真实 LLM | `aegiscode/cli.py`、`Makefile::e2e-real-llm`(不在 `make test`/CI) | `tests/test_e2e_real_llm_offline.py::test_makefile_e2e_target_not_in_test` | ✅ 通过 |
+
+**Milestone 8 自动测试（零网络）：** `make test` → **444 passed**（419 基线 + 25 新:T33-T40）；`make demo` → **3 passed, 0 failed**
 
 ---
 
 ## 总体验收
 
-当前 worktree(`webui-mock-demos`,追加任务 C)复跑:`make test` → **419 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。PLAN 32 个原始 task 全部 `✅ DONE` 且带 commit hash + 追加任务 A/B/C/D;SPEC_PROCESS 五要素齐全。矩阵中每条要求均映射到可定位的实现文件、自动测试与演示证据。**WebUI 公网部署已完成**(追加任务 B,https://aegiscode-o20h.onrender.com);**WebUI 预设 MockLLM 演示**(追加任务 C)实现 + 自动测试 + 本地 Docker Demo Mode 实测 + **公网人工验收(2026-07-16,PR #12 → main `fb7029f` → Render 重部署)全部通过**(见上「WebUI 预设 MockLLM 演示」矩阵与 AGENT_LOG)。**真实 LLM Provider 可用性**(追加任务 D)：DeepSeek 驱动端到端验收通过，完整治理路径（解析→治理→HITL 审批→工具执行→pytest 验证→COMPLETED）实测证明（见上「追加任务 D」矩阵与 AGENT_LOG）。
+在 `main` 分支复跑:`make test` → **444 passed**(1 warning,starlette/httpx 弃用提示,非本项目代码);`make demo` → **3 passed, 0 failed(exit 0)**(Demo 1 危险拦截 / Demo 2 反馈回灌 / Demo 3 审批绑定,均 MockLLM 驱动、零网络)。
+
+**课程基础要求**(MockLLM 确定性测试 + 三项机制演示 + 六维度最小实现、治理为重点维度)全部满足:PLAN 32 个原始 task 全部 `✅ DONE` 且带 commit hash;SPEC_PROCESS 五要素齐全。
+
+**原计划交付项(首次未完成/暂缓,后续恢复完成)**:GitHub Actions CI(原计划要求 CI 含 `unit-test` job / SPEC §5.1「Docker + CI」;首次只做 GitLab CI,后续补齐并硬化 GitHub Actions,PR #10);Render 公网部署(SPEC §13.4 / M14 硬性要求,首次暂缓、后续恢复完成,PR #11)已上线 https://aegiscode-o20h.onrender.com。
+
+**迭代修改(对已交付功能的完善)**:WebUI 预设 MockLLM 演示(对 Task 28 WebUI 的迭代,PR #12,公网人工验收 2026-07-16 通过)、黑白灰 UI(纯 CSS 迭代,PR #14)。均未改变布局 / Harness / API / 治理 / 审批 / Demo 逻辑。
+
+**追加实现(enhancement,课程要求之外——本项目唯一)**:真实 LLM Provider 可用性(PR #16/#17/#18,DeepSeek 端到端人工验证 PASS)。真实 LLM 验证为人工触发,**不替代** MockLLM 测试与 `make demo`。

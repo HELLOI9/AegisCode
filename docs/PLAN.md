@@ -2840,21 +2840,29 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 
 ---
 
-## Follow-up tasks (delivery enhancements after core completion; NOT part of the original plan)
+## Post-core-completion delivery items (each labeled by its true nature)
 
-> The items below are **not** part of the original 32-task plan, but delivery enhancements made during the development/acceptance phase. They are labeled accurately to avoid "retroactively passing them off as part of the original plan."
+> The items below were carried out after the core 32-task plan was accepted. They fall into three distinct categories; each is labeled accordingly to avoid misrepresentation:
+>
+> - **Completion of originally-planned requirements** (planned from the start, not finished in the first pass, later resumed and completed — NOT new enhancements):
+>   - **GitHub Actions CI**: the original plan required CI with a `unit-test` job (Global Constraints; SPEC §5.1 "Docker + CI"). The first pass delivered only `.gitlab-ci.yml` (T32); since the repo is hosted on GitHub, a GitHub Actions workflow was later added and hardened so CI actually runs. This completes the originally-planned CI requirement on the actual hosting platform.
+>   - **Render public deployment**: SPEC §13.4 and M14 required a public demo URL (checklist item 9, mandatory). It was not broken out as a standalone numbered task in the first pass and was deferred; it was later resumed and completed.
+> - **Iteration on an existing feature** (refinement of already-delivered work, not a new capability):
+>   - **WebUI preset MockLLM demos**: an iteration on the originally-delivered WebUI (Task 28) that adds a graphical entry point for the three `make demo` mechanisms; it changed no Harness / API / governance / approval logic.
+> - **Enhancement beyond the course baseline** (genuinely new, outside the original plan and the course's baseline requirements):
+>   - **Real LLM Provider availability** (Milestone 8): the course baseline only requires MockLLM deterministic tests + 3 mechanism demos. Making a real Provider actually drive the Harness (system prompt, dynamic tool protocol, request assembly, human-triggered E2E) is the one genuine enhancement here.
 
-### Follow-up task A: GitHub Actions hardening (branch `chore/github-actions`)
+### Item A: GitHub Actions CI — completion of the originally-planned CI requirement on the actual host (branch `chore/github-actions`)
 
-- **Reason added**: Task 32 already delivered `.gitlab-ci.yml` (the signed-off PLAN's primary CI) plus a `.github/workflows/ci.yml` mirror (commit 3698399/8a02d9f), so CI actually runs on the GitHub-hosted repo. However, that mirror was missing hardening items later required by the acceptance spec: manual trigger (`workflow_dispatch`), least privilege (`permissions: contents: read`), concurrency control (grouped by ref), dependency caching (setup-python pip cache), and step naming. This task fills those gaps **without changing the source of test truth** (still reuses `make test`/`make demo`; test logic is not duplicated).
+- **Provenance (original plan, completed on the actual host)**: CI was required from the start — the original PLAN Global Constraints ("CI must contain a job named `unit-test`") and SPEC §5.1 ("Docker + CI"). The first pass (Task 32) delivered `.gitlab-ci.yml` (the signed-off PLAN's primary CI) plus a `.github/workflows/ci.yml` mirror (commit 3698399/8a02d9f). Because the repo is hosted on GitHub, GitLab pipelines do not run automatically, so the GitHub Actions workflow is what actually executes CI. This item completes and hardens that workflow — manual trigger (`workflow_dispatch`), least privilege (`permissions: contents: read`), concurrency control (grouped by ref), dependency caching (setup-python pip cache), step naming — **without changing the source of test truth** (still reuses `make test`/`make demo`; test logic is not duplicated). It is the completion of the originally-planned CI requirement on the real hosting platform, not a new enhancement.
 - **Scope**: Only `.github/workflows/ci.yml` was modified (single-file hardening; no duplicate workflow was created; `.gitlab-ci.yml` was left untouched and the `unit-test` job is preserved). Docs updated: README §16 (Continuous Integration), `docs/ACCEPTANCE.md` (GitHub Actions row), `docs/AGENT_LOG.md` (CI addendum entry).
 - **Verification results**: Local `make test` → 325 passed; `make demo` → 3 passed/0 failed (exit 0); `tests/test_ci_config.py` → 8 passed; `docker build -t aegiscode:ci .` → succeeded; both CI YAML files parse cleanly. **GitHub remote run: ✅ succeeded** ([run 29395362746](https://github.com/HELLOI9/AegisCode/actions/runs/29395362746), all three jobs green).
 - **Implementation commit**: `bd98d9c` (hardening) + gitleaks token fix (see PR [#10](https://github.com/HELLOI9/AegisCode/pull/10)); see the AGENT_LOG CI addendum entry for details.
 
-### Follow-up task B: Render public deployment (branch `deploy/render-web-service`)
+### Item B: Render public deployment — completion of an originally-planned requirement (branch `deploy/render-web-service`)
 
-- **Reason added**: SPEC §13.4 + M14 require a "public demo URL" (checklist item 9, mandatory). In the original 32-task plan, Task 30 only covered the Dockerfile build; public deployment was never broken out as a standalone task. It had been deferred on the grounds of "core Harness and CI finished first, platform deployment postponed", and ACCEPTANCE and README both marked "public URL pending deployment". Now resumed.
-- **Prior deferral reason**: The core Harness, governance mechanisms, and CI pipeline were accepted first; public deployment depends on all mechanisms being in place before going live.
+- **Provenance (original plan, deferred then resumed)**: A public demo URL was required from the start — SPEC §13.4 and M14 (checklist item 9, mandatory). In the original 32-task plan, however, Task 30 only covered the Dockerfile build, and public deployment was never broken out as its own numbered task. It was **deferred** during the first pass (not cancelled), and ACCEPTANCE and README both marked "public URL pending deployment". This item **resumes and completes that original requirement**; it is not a newly-added enhancement and the original task numbering is unchanged.
+- **Prior deferral reason**: The core Harness, governance mechanisms, and CI pipeline were accepted first; public deployment was sequenced to come online after all mechanisms were in place.
 - **Resumption date**: 2026-07-15
 - **Scope**:
   - Add `render.yaml` (Render Blueprint, Docker, free plan, /healthz, checksPass)
@@ -2884,9 +2892,9 @@ git commit -m "ci: unit-test job + secret scan + docker build"
 - **`make deploy-check` public result**: All checks passed (/healthz=200, no secrets, WebUI OK)
 - **Manual acceptance**: ✅ Passed (2026-07-15)
 
-### Follow-up task C: WebUI preset MockLLM demos (branch `worktree-webui-mock-demos`)
+### Item C: WebUI preset MockLLM demos — iteration on the originally-delivered WebUI (Task 28) (branch `worktree-webui-mock-demos`)
 
-- **Reason added**: Follow-up task B completed the Render public deployment + Demo Mode + an accessible WebUI, but **the deployed WebUI provided no graphical entry point for the three `make demo` MockLLM demos**. The original Task 28 (WebUI) only required "single page + event stream + approval panel", and follow-up task B only required "public URL + Demo Mode"; **neither required a graphical mechanism demo**. This task faithfully adds an "acceptance completion item" under the original task to satisfy public-demo completeness — not pretending this feature was already done.
+- **Nature (iteration on Task 28)**: Item B delivered the Render public deployment + Demo Mode + an accessible WebUI, but **the deployed WebUI provided no graphical entry point for the three `make demo` MockLLM demos**. The original Task 28 (WebUI) only required "single page + event stream + approval panel". This is an **iteration on that originally-delivered WebUI** — it adds a graphical entry point for the three mechanisms (reusing the same scenarios and success conditions as `make demo`) and changes no Harness / API / governance / approval logic. It is a refinement of existing work, not a new capability, and does not claim the feature existed earlier.
 - **Prior gap**: Under Demo Mode, `build_llm(provider="mock")` returned `MockLLM([])` (empty script), so any `POST /tasks` immediately hit LLM_ERROR; the three demo scenarios were hard-coded in `demos/*.py`, with no shared scenario layer, no Demo API, and no WebUI demo entry point.
 - **Resumption date**: 2026-07-15
 - **Work in this completion**:
