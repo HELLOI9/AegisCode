@@ -1,9 +1,9 @@
-# AegisCode — SPEC(设计规约)
+# AegisCode — SPEC（设计规约）
 
 > **AegisCode** — A policy-governed coding agent harness with deterministic feedback loops.
 >
-> 本文档由 brainstorming 阶段(25 轮设计问答)沉淀而成,过程记录见 [`SPEC_PROCESS.md`](./SPEC_PROCESS.md)。
-> 本文档**只整理已确认的设计决策**;仍未解决者一律标记为「未决问题」,不做猜测。
+> 本文档由 brainstorming 阶段（25 轮设计问答）沉淀而成，过程记录见 [`SPEC_PROCESS.md`](./SPEC_PROCESS.md)。
+> 本文档**只整理已确认的设计决策**；仍未解决者一律标记为「未决问题」，不做猜测。
 > 本阶段不含实现代码。
 
 ---
@@ -12,15 +12,15 @@
 
 1. 问题陈述
 2. 目标用户与项目价值
-3. 用户故事(INVEST)
-4. 核心使用场景(黄金路径)
+3. 用户故事（INVEST）
+4. 核心使用场景（黄金路径）
 5. MVP 范围与非目标
-6. 功能规约(按模块)
+6. 功能规约（按模块）
 7. 非功能性需求
 8. 系统架构
 9. 数据模型
-10. 领域与机制设计(§A.5 独立章节)
-11. 治理与安全护栏:主要贡献(独立章节)
+10. 领域与机制设计（§A.5 独立章节）
+11. 治理与安全护栏：主要贡献（独立章节）
 12. 凭据威胁模型
 13. 凭据与分发设计
 14. 技术选型与理由
@@ -32,175 +32,175 @@
 
 ## 1. 问题陈述
 
-当 LLM 能完成大部分编码"思考"时,把一个"只会产生下一步设想"的 LLM 封装成一台**稳定、可靠、可信**的系统,价值落在 harness 这层工程上。现有 Coding Agent(Claude Code、Codex 等)的安全治理多为产品化黑盒或系统提示词约束:使用者无法独立验证"哪些动作会被拒、哪些进审批、为什么",也无法在移除 LLM 后对这些判定做确定性测试。
+当 LLM 能完成大部分编码"思考"时，把一个"只会产生下一步设想"的 LLM 封装成一台**稳定、可靠、可信**的系统，价值落在 harness 这层工程上。现有 Coding Agent（Claude Code、Codex 等）的安全治理多为产品化黑盒或系统提示词约束：使用者无法独立验证"哪些动作会被拒、哪些进审批、为什么"，也无法在移除 LLM 后对这些判定做确定性测试。
 
-AegisCode 要解决的问题:**让开发者敢把本地代码仓库交给一个 Agent 去修改**——通过把安全治理从"系统提示词里的一句嘱托"变成一套**确定性、可单测、可审计的策略引擎**。
+AegisCode 要解决的问题：**让开发者敢把本地代码仓库交给一个 Agent 去修改**——通过把安全治理从"系统提示词里的一句嘱托"变成一套**确定性、可单测、可审计的策略引擎**。
 
-**差异化主句(核心定位):**
+**差异化主句（核心定位）：**
 
-> AegisCode 把 Coding Agent 的安全治理从"系统提示词里的一句嘱托"变成一套**确定性、可单测、可审计的策略引擎**:每条拒绝/审批判定都能脱离 LLM 用单元测试验证,每次动作都留下防篡改的审计证据。
+> AegisCode 把 Coding Agent 的安全治理从"系统提示词里的一句嘱托"变成一套**确定性、可单测、可审计的策略引擎**：每条拒绝/审批判定都能脱离 LLM 用单元测试验证，每次动作都留下防篡改的审计证据。
 
-**定位取舍:** AegisCode **不以补丁的智能程度竞争**(那取决于底层 LLM,不是本项目的工程),**只以治理的确定性与可验证性竞争**。演示中刻意使用不算聪明的 MockLLM,反而更能凸显"即使 LLM 犯浑,harness 也守得住边界"。
+**定位取舍：** AegisCode **不以补丁的智能程度竞争**（那取决于底层 LLM，不是本项目的工程），**只以治理的确定性与可验证性竞争**。演示中刻意使用不算聪明的 MockLLM，反而更能凸显"即使 LLM 犯浑，harness 也守得住边界"。
 
 ---
 
 ## 2. 目标用户与项目价值
 
-**核心目标用户:** 担心 Agent 越权访问(读 `.env`/凭据、逃出工作区)或执行危险命令(`rm -rf`、`git push`、装依赖),但仍希望用 Agent 修改本地代码的开发者。
+**核心目标用户：** 担心 Agent 越权访问（读 `.env`/凭据、逃出工作区）或执行危险命令（`rm -rf`、`git push`、装依赖），但仍希望用 Agent 修改本地代码的开发者。
 
-**次要用户:** 想观察 Agent 每轮内部状态、审批高风险操作、查看审计记录的学习者与 harness 机制研究者。
+**次要用户：** 想观察 Agent 每轮内部状态、审批高风险操作、查看审计记录的学习者与 harness 机制研究者。
 
-**核心价值:** 确定性 + 可单测 + 可审计的策略引擎;每次动作留下防篡改审计证据。信任来自可追溯,而非"相信 LLM 会听话"。
+**核心价值：** 确定性 + 可单测 + 可审计的策略引擎；每次动作留下防篡改审计证据。信任来自可追溯，而非"相信 LLM 会听话"。
 
-**Main Contribution(深度维度):治理**。两个出口深挖:
-- **甲 = 命令词法治理**(shell 出口);
-- **乙 = 路径围栏**(文件出口)。
-- 丙(网络/发布/外部副作用)只做粗粒度(默认禁止或一律进审批)。
+**Main Contribution（深度维度）：治理**。两个出口深挖：
+- **甲 = 命令词法治理**（shell 出口）；
+- **乙 = 路径围栏**（文件出口）。
+- 丙（网络/发布/外部副作用）只做粗粒度（默认禁止或一律进审批）。
 
-反馈闭环是**完整但非最深**的第二支柱(Agent 必须能据客观信号自我修正)。
-
----
-
-## 3. 用户故事(遵循 INVEST)
-
-- **US-1(危险命令拦截):** 作为担心破坏性操作的开发者,我希望当 Agent 试图执行 `rm -rf`、`sudo`、`git push` 等危险命令时被确定性拦截,以便我的系统不会被误操作破坏。
-  - 验收:构造该动作 → 治理返回 DENY;工具执行次数为 0;审计记录拒绝原因。
-
-- **US-2(作用域限制):** 作为开发者,我希望 Agent 无法读写工作区之外的文件(包括通过 `..`、绝对路径、符号链接逃逸),以便凭据与系统文件不被触碰。
-  - 验收:构造逃逸路径 → DENY;未读到/写到工作区外内容。
-
-- **US-3(人工审批):** 作为开发者,我希望灰色地带操作(如 `pip install`)暂停并等我批准,批准后只执行我看过的那个动作,以便我对高风险动作保有控制权。
-  - 验收:REQUIRE_APPROVAL 暂停;批准执行原始快照;拒绝则反馈回灌 Agent 继续。
-
-- **US-4(客观反馈自我修正):** 作为开发者,我希望 Agent 根据真实测试失败信息修改下一步动作,而不是空转或谎称完成,以便它能真正把任务做对。
-  - 验收:测试失败反馈进入下一轮上下文;下一次动作与上次不同;最终由 harness 复跑测试判定成功。
-
-- **US-5(可审计):** 作为开发者,我希望完整追溯 Agent 每个动作、每次治理判定、每次审批结果,且审计记录防篡改,以便事后核查。
-  - 验收:审计事件流可查看;`verify_chain` 校验通过;篡改任一条 → 校验失败。
-
-- **US-6(凭据安全):** 作为开发者,我希望安全录入/查看/清除 LLM API Key,查看时不回显明文,且 Key 绝不进入源码、Git、日志,以便凭据不泄漏。
-  - 验收:`key status` 只显示已配置+掩码;secret scanner 能检出被植入的假 Key。
-
-- **US-7(声明式约束):** 作为开发者,我希望通过配置文件声明工作区、允许/禁止的命令、需审批的动作,且规则由代码强制执行(非 LLM 自觉),以便约束可被独立验证。
-  - 验收:修改配置能改变治理判定(单测);非法配置启动即报错。
+反馈闭环是**完整但非最深**的第二支柱（Agent 必须能据客观信号自我修正）。
 
 ---
 
-## 4. 核心使用场景(黄金路径)
+## 3. 用户故事（遵循 INVEST）
 
-用户选择一个本地 Python 项目并提交一个局部修复任务。AegisCode 的确定性剧本:
+- **US-1（危险命令拦截）：** 作为担心破坏性操作的开发者，我希望当 Agent 试图执行 `rm -rf`、`sudo`、`git push` 等危险命令时被确定性拦截，以便我的系统不会被误操作破坏。
+  - 验收：构造该动作 → 治理返回 DENY；工具执行次数为 0；审计记录拒绝原因。
 
-1. 用户提交任务;
-2. (轮1)Agent `read_file` 读取相关代码 —— 路径围栏校验通过,ALLOW;
-3. (轮2)Agent 请求 `run_command: "pip install <lib>"` —— 治理判定 **REQUIRE_APPROVAL**,任务暂停;
-4. 用户**拒绝** —— 产生 `APPROVAL_REJECTED` 反馈回灌;
-5. (轮3)Agent 改用标准库重写,`write_file` —— 路径围栏校验通过;
-6. (轮4)Agent `run_tests` —— 测试**失败**,产生 `TEST_FAILURE` 反馈(截断脱敏)回灌;
-7. (轮5)Agent 根据失败信息修正,`write_file`;
-8. (轮6)Agent `run_tests` —— 测试**通过**;
-9. Agent 请求 `finish` —— harness **独立复跑目标测试 = 全绿**,且无越界、无待审批 → **COMPLETED**。
+- **US-2（作用域限制）：** 作为开发者，我希望 Agent 无法读写工作区之外的文件（包括通过 `..`、绝对路径、符号链接逃逸），以便凭据与系统文件不被触碰。
+  - 验收：构造逃逸路径 → DENY；未读到/写到工作区外内容。
 
-任何越过工作区、安装依赖、删除文件或执行高风险命令的操作,都会被拒绝或进入人工审批。**完成判定不依赖 LLM 声称,而由 harness 的最终验证器复跑测试决定。**
+- **US-3（人工审批）：** 作为开发者，我希望灰色地带操作（如 `pip install`）暂停并等我批准，批准后只执行我看过的那个动作，以便我对高风险动作保有控制权。
+  - 验收：REQUIRE_APPROVAL 暂停；批准执行原始快照；拒绝则反馈回灌 Agent 继续。
+
+- **US-4（客观反馈自我修正）：** 作为开发者，我希望 Agent 根据真实测试失败信息修改下一步动作，而不是空转或谎称完成，以便它能真正把任务做对。
+  - 验收：测试失败反馈进入下一轮上下文；下一次动作与上次不同；最终由 harness 复跑测试判定成功。
+
+- **US-5（可审计）：** 作为开发者，我希望完整追溯 Agent 每个动作、每次治理判定、每次审批结果，且审计记录防篡改，以便事后核查。
+  - 验收：审计事件流可查看；`verify_chain` 校验通过；篡改任一条 → 校验失败。
+
+- **US-6（凭据安全）：** 作为开发者，我希望安全录入/查看/清除 LLM API Key，查看时不回显明文，且 Key 绝不进入源码、Git、日志，以便凭据不泄漏。
+  - 验收：`key status` 只显示已配置+掩码；secret scanner 能检出被植入的假 Key。
+
+- **US-7（声明式约束）：** 作为开发者，我希望通过配置文件声明工作区、允许/禁止的命令、需审批的动作，且规则由代码强制执行（非 LLM 自觉），以便约束可被独立验证。
+  - 验收：修改配置能改变治理判定（单测）；非法配置启动即报错。
+
+---
+
+## 4. 核心使用场景（黄金路径）
+
+用户选择一个本地 Python 项目并提交一个局部修复任务。AegisCode 的确定性剧本：
+
+1. 用户提交任务；
+2. （轮1）Agent `read_file` 读取相关代码 —— 路径围栏校验通过，ALLOW;
+3. （轮2）Agent 请求 `run_command: "pip install <lib>"` —— 治理判定 **REQUIRE_APPROVAL**，任务暂停；
+4. 用户**拒绝** —— 产生 `APPROVAL_REJECTED` 反馈回灌；
+5. （轮3）Agent 改用标准库重写，`write_file` —— 路径围栏校验通过；
+6. （轮4）Agent `run_tests` —— 测试**失败**，产生 `TEST_FAILURE` 反馈（截断脱敏）回灌；
+7. （轮5）Agent 根据失败信息修正，`write_file`;
+8. （轮6）Agent `run_tests` —— 测试**通过**;
+9. Agent 请求 `finish` —— harness **独立复跑目标测试 = 全绿**，且无越界、无待审批 → **COMPLETED**。
+
+任何越过工作区、安装依赖、删除文件或执行高风险命令的操作，都会被拒绝或进入人工审批。**完成判定不依赖 LLM 声称，而由 harness 的最终验证器复跑测试决定。**
 
 ---
 
 ## 5. MVP 范围与非目标
 
-### 5.1 Must(第一版必做)
-单用户 / 单任务 / 单个本地仓库 / **锁定 Python + pytest 单栈**;自实现 Agent 主循环 + LLM 抽象层(OpenAI + Anthropic + MockLLM);结构化动作协议 + 工具注册分发;治理引擎(甲命令词法治理 + 乙路径围栏 + 四档判定 + HITL 审批状态机 + 审计哈希链);反馈闭环(pytest + 命令退出码 + 文件变更范围检查);停机与防死循环;SQLite 最小记忆(无向量库);YAML 声明式配置;极简 WebUI;CLI;凭据 keyring + `.env` 降级;Docker + CI。
+### 5.1 Must（第一版必做）
+单用户 / 单任务 / 单个本地仓库 / **锁定 Python + pytest 单栈**；自实现 Agent 主循环 + LLM 抽象层（OpenAI + Anthropic + MockLLM）；结构化动作协议 + 工具注册分发；治理引擎（甲命令词法治理 + 乙路径围栏 + 四档判定 + HITL 审批状态机 + 审计哈希链）；反馈闭环（pytest + 命令退出码 + 文件变更范围检查）；停机与防死循环；SQLite 最小记忆（无向量库）；YAML 声明式配置；极简 WebUI;CLI；凭据 keyring + `.env` 降级；Docker + CI。
 
-### 5.2 Should(延后,不影响核心闭环)
-`ruff`(lint)与 `mypy`(typecheck)作为额外反馈传感器;自动回滚(写前快照 + `rollback_task`);WebUI 实时推送 SSE。
+### 5.2 Should（延后，不影响核心闭环）
+`ruff`（lint）与 `mypy`（typecheck）作为额外反馈传感器；自动回滚（写前快照 + `rollback_task`）；WebUI 实时推送 SSE。
 
-### 5.3 Won't / 非目标(明确写入,不做)
-完整替代 Claude Code;多 Agent 编排;并行子 Agent;云端仓库自动修改;远程服务器控制;自动部署生产;自动 `git push`;大规模代码库索引;向量/语义检索;多用户权限系统;企业级沙箱;**多语言支持**;**通用 shell 的完整安全化**;**任务并发**。
+### 5.3 Won't / 非目标（明确写入，不做）
+完整替代 Claude Code；多 Agent 编排；并行子 Agent；云端仓库自动修改；远程服务器控制；自动部署生产；自动 `git push`；大规模代码库索引；向量/语义检索；多用户权限系统；企业级沙箱；**多语言支持**;**通用 shell 的完整安全化**;**任务并发**。
 
 ---
 
-## 6. 功能规约(按模块)
+## 6. 功能规约（按模块）
 
-> 每模块给出:输入 / 行为 / 输出 / 边界条件 / 错误处理。所有"机制"均为确定性代码(见 §10 领域与机制设计、§16 MockLLM 测试策略)。
+> 每模块给出：输入 / 行为 / 输出 / 边界条件 / 错误处理。所有"机制"均为确定性代码（见 §10 领域与机制设计、§16 MockLLM 测试策略）。
 
 ### M1 · Agent 主循环
-- **输入:** 用户任务、工作区路径、配置。
-- **行为:** 严格单动作循环——构建上下文 → 调 LLM → 解析 1 个 Action → 治理判定 → (审批暂停) → 工具执行 → 反馈分类回灌 → 落盘 → 停机判定。`run_tests` 兼具工具与反馈传感器身份;`finish` 触发 harness 独立最终验证。
-- **输出:** 每轮一条 `steps` 记录 + 审计事件;终止时给出 TerminationReason。
-- **边界:** 达 max_steps / 连续失败 M / NO_PROGRESS 阈值 → 停机;审批处暂停并持久化。默认阈值 **max_steps=25 / 连续失败 M=5 / NO_PROGRESS 累计=3**(均可 YAML 覆盖)。
-- **停机原因枚举(TerminationReason,9 种):** `COMPLETED`(finish 且最终验证全绿、无越界、无待审批) / `FINISH_REJECTED`(finish 但验证未过→回灌继续,撞上限转 MAX_STEPS) / `MAX_STEPS` / `CONSECUTIVE_FAILURES` / `NO_PROGRESS` / `INVALID_ACTION_LIMIT`(连续 3 次无效动作) / `LLM_ERROR` / `INTERNAL_ERROR` / `CANCELLED`(用户取消)。
-- **每轮判定优先级(从高到低,短路):** ① 内部异常→INTERNAL_ERROR 停 ② 用户已取消→CANCELLED 停 ③ 动作无效→计数,连续 3 次→INVALID_ACTION_LIMIT 停,否则回灌纠错继续 ④ 治理 DENY→回灌 POLICY_DENIED,计入连续失败,**不停** ⑤ 治理 REQUIRE_APPROVAL→暂停(不算失败)⑥ 工具执行→反馈回灌,failure/error 则连续失败+1、成功清零 ⑦ 动作是 finish→跑最终验证,过→COMPLETED,不过→回灌继续 ⑧ 轮末检查计数类停机(MAX_STEPS/CONSECUTIVE_FAILURES/NO_PROGRESS)。审批被拒 → 继续(APPROVAL_REJECTED 反馈 + 计入连续失败)。
-- **错误:** LLM 调用失败退避重试 3 次后 `LLM_ERROR` 停机;harness 内部异常 → `INTERNAL_ERROR`。
+- **输入：** 用户任务、工作区路径、配置。
+- **行为：** 严格单动作循环——构建上下文 → 调 LLM → 解析 1 个 Action → 治理判定 → （审批暂停） → 工具执行 → 反馈分类回灌 → 落盘 → 停机判定。`run_tests` 兼具工具与反馈传感器身份；`finish` 触发 harness 独立最终验证。
+- **输出：** 每轮一条 `steps` 记录 + 审计事件；终止时给出 TerminationReason。
+- **边界：** 达 max_steps / 连续失败 M / NO_PROGRESS 阈值 → 停机；审批处暂停并持久化。默认阈值 **max_steps=25 / 连续失败 M=5 / NO_PROGRESS 累计=3**（均可 YAML 覆盖）。
+- **停机原因枚举（TerminationReason,9 种）：** `COMPLETED`（finish 且最终验证全绿、无越界、无待审批） / `FINISH_REJECTED`（finish 但验证未过→回灌继续，撞上限转 MAX_STEPS） / `MAX_STEPS` / `CONSECUTIVE_FAILURES` / `NO_PROGRESS` / `INVALID_ACTION_LIMIT`（连续 3 次无效动作） / `LLM_ERROR` / `INTERNAL_ERROR` / `CANCELLED`（用户取消）。
+- **每轮判定优先级（从高到低，短路）：** ① 内部异常→INTERNAL_ERROR 停 ② 用户已取消→CANCELLED 停 ③ 动作无效→计数，连续 3 次→INVALID_ACTION_LIMIT 停，否则回灌纠错继续 ④ 治理 DENY→回灌 POLICY_DENIED，计入连续失败，**不停** ⑤ 治理 REQUIRE_APPROVAL→暂停（不算失败）⑥ 工具执行→反馈回灌，failure/error 则连续失败+1、成功清零 ⑦ 动作是 finish→跑最终验证，过→COMPLETED，不过→回灌继续 ⑧ 轮末检查计数类停机（MAX_STEPS/CONSECUTIVE_FAILURES/NO_PROGRESS）。审批被拒 → 继续（APPROVAL_REJECTED 反馈 + 计入连续失败）。
+- **错误：** LLM 调用失败退避重试 3 次后 `LLM_ERROR` 停机；harness 内部异常 → `INTERNAL_ERROR`。
 
 ### M2 · LLM 抽象层
-- **输入:** 消息列表 + 参数。
-- **行为:** 统一 `LLMClient` 接口;实现 `OpenAIAdapter`(chat completions,可配 base_url)、`AnthropicAdapter`(messages API)、`MockLLM`(按序响应队列)。协议差异封装在适配器内,主循环不感知厂商。
-- **输出:** 文本补全。
-- **边界:** MockLLM 零网络、零 Key。
-- **错误:** 真实适配器网络/鉴权失败向主循环抛出,由重试逻辑处理。
+- **输入：** 消息列表 + 参数。
+- **行为：** 统一 `LLMClient` 接口；实现 `OpenAIAdapter`（chat completions，可配 base_url）、`AnthropicAdapter`（messages API）、`MockLLM`（按序响应队列）。协议差异封装在适配器内，主循环不感知厂商。
+- **输出：** 文本补全。
+- **边界：** MockLLM 零网络、零 Key。
+- **错误：** 真实适配器网络/鉴权失败向主循环抛出，由重试逻辑处理。
 
 ### M3 · 结构化动作协议
-- **输入:** LLM 原始文本。
-- **行为:** 稳健 JSON 提取(优先 ```json 围栏,否则取最后一个平衡 JSON 对象)→ Pydantic 校验(类型/必填/tool 在注册表/arguments 匹配工具 schema)。动作模型 `{thought, tool, arguments, expectation?}`,`finish` 为独立工具。
-- **输出:** 校验通过的 Action 对象。
-- **边界:** 多余散文由 `thought` 字段承接。
-- **错误:** 校验失败 → `INVALID_ACTION` 结构化纠错反馈回灌;连续 3 次无效 → `INVALID_ACTION_LIMIT` 停机。未知工具 → INVALID_ACTION;被配置禁用的工具 → 治理 DENY(区分二者)。
+- **输入：** LLM 原始文本。
+- **行为：** 稳健 JSON 提取（优先 ```json 围栏，否则取最后一个平衡 JSON 对象）→ Pydantic 校验（类型/必填/tool 在注册表/arguments 匹配工具 schema）。动作模型 `{thought, tool, arguments, expectation?}`，`finish` 为独立工具。
+- **输出：** 校验通过的 Action 对象。
+- **边界：** 多余散文由 `thought` 字段承接。
+- **错误：** 校验失败 → `INVALID_ACTION` 结构化纠错反馈回灌；连续 3 次无效 → `INVALID_ACTION_LIMIT` 停机。未知工具 → INVALID_ACTION；被配置禁用的工具 → 治理 DENY（区分二者）。
 
 ### M4 · 工具注册与分发
-- **输入:** Action。
-- **行为:** 工具接口统一;注册表查找;参数校验;治理判定后执行;错误捕获;结果标准化为 ToolResult。
-- **输出:** ToolResult。
-- **边界:** 7 个工具:`list_files` / `read_file` / `search_text`(纯 Python 遍历)/ `write_file`(全量覆盖、仅文本、写前快照、大小限制)/ `run_tests` / `run_command` / `finish`。
-- **错误:** 工具执行异常 → `TOOL_ERROR`;二进制文件读取 → 结构化"已跳过"而非乱码。
+- **输入：** Action。
+- **行为：** 工具接口统一；注册表查找；参数校验；治理判定后执行；错误捕获；结果标准化为 ToolResult。
+- **输出：** ToolResult。
+- **边界：** 7 个工具：`list_files` / `read_file` / `search_text`（纯 Python 遍历）/ `write_file`（全量覆盖、仅文本、写前快照、大小限制）/ `run_tests` / `run_command` / `finish`。
+- **错误：** 工具执行异常 → `TOOL_ERROR`；二进制文件读取 → 结构化"已跳过"而非乱码。
 
-### M5 · 治理引擎(甲 · 命令词法治理)
-- **输入:** `run_command` 的命令**字符串**。
-- **行为:** 5 层确定性管线——① shlex 词法解析(失败=INVALID_ACTION)② 结构安全层(管道/重定向/串联/命令替换/子 shell/后台/通配注入 → 一律 DENY)③ 允许列表(argv0 不在白名单 → DENY)④ 危险参数级规则 ⑤ 执行层(`shell=False` + argv 数组 + 超时 + 输出上限 + cwd 锁工作区,永不 `shell=True`)。
-- **输出:** 治理判定(四档)+ rule_id + reason;或标准化命令结果。
-- **边界:** DENY = `rm -rf`/`sudo`/`su`/`chmod`/`chown`/`curl`/`wget`/`git push`/`git reset --hard`/`git clean`/`python -c`/`python -m <inline>`/任意元结构;REQUIRE_APPROVAL = `pip install`/`git commit`/写非白名单目录。
-- **错误:** 词法解析失败 → INVALID_ACTION;命令超时 → TIMEOUT。
+### M5 · 治理引擎（甲 · 命令词法治理）
+- **输入：** `run_command` 的命令**字符串**。
+- **行为：** 5 层确定性管线——① shlex 词法解析（失败=INVALID_ACTION）② 结构安全层（管道/重定向/串联/命令替换/子 shell/后台/通配注入 → 一律 DENY）③ 允许列表（argv0 不在白名单 → DENY）④ 危险参数级规则 ⑤ 执行层（`shell=False` + argv 数组 + 超时 + 输出上限 + cwd 锁工作区，永不 `shell=True`）。
+- **输出：** 治理判定（四档）+ rule_id + reason；或标准化命令结果。
+- **边界：** DENY = `rm -rf`/`sudo`/`su`/`chmod`/`chown`/`curl`/`wget`/`git push`/`git reset --hard`/`git clean`/`python -c`/`python -m <inline>`/任意元结构；REQUIRE_APPROVAL = `pip install`/`git commit`/写非白名单目录。
+- **错误：** 词法解析失败 → INVALID_ACTION；命令超时 → TIMEOUT。
 
-### M6 · 治理引擎(乙 · 路径围栏)
-- **输入:** 文件工具的路径参数。
-- **行为:** ① 拒空/非字符串 ② 相对路径拼 workspace_root,绝对路径允许但须 realpath 后在工作区内 ③ realpath 解析(解掉 `..` + 符号链接)④ 归属判定 `is_relative_to(realpath(root))`,否则 DENY ⑤ 敏感文件黑名单 DENY ⑥ 通过则交类别默认档。新建文件对**父目录**做 realpath 归属判定 + 校验文件名非软链。
-- **输出:** 治理判定 + rule_id + reason。
-- **边界:** 路径穿越 / 绝对路径越界 / 符号链接逃逸 → DENY;敏感文件(`.env`/`.git/`/`*.pem`/`*.key`/`*credentials*`)读写皆 DENY;仅支持 Linux。
-- **错误:** 不存在的父目录 → TOOL_ERROR(而非误判越界)。
+### M6 · 治理引擎（乙 · 路径围栏）
+- **输入：** 文件工具的路径参数。
+- **行为：** ① 拒空/非字符串 ② 相对路径拼 workspace_root，绝对路径允许但须 realpath 后在工作区内 ③ realpath 解析（解掉 `..` + 符号链接）④ 归属判定 `is_relative_to(realpath(root))`，否则 DENY ⑤ 敏感文件黑名单 DENY ⑥ 通过则交类别默认档。新建文件对**父目录**做 realpath 归属判定 + 校验文件名非软链。
+- **输出：** 治理判定 + rule_id + reason。
+- **边界：** 路径穿越 / 绝对路径越界 / 符号链接逃逸 → DENY；敏感文件（`.env`/`.git/`/`*.pem`/`*.key`/`*credentials*`）读写皆 DENY；仅支持 Linux。
+- **错误：** 不存在的父目录 → TOOL_ERROR（而非误判越界）。
 
-### M7 · 人工审批状态机(HITL)
-- **输入:** 治理判定为 REQUIRE_APPROVAL 的动作。
-- **行为:** 任务转 APPROVAL_REQUIRED 暂停,持久化 ApprovalRequest(action_snapshot + fingerprint + rule_id + reason + risk_explanation);用户裁决后恢复。
-- **输出:** APPROVED → 执行原始动作快照;REJECTED → `APPROVAL_REJECTED` 反馈继续。
-- **边界:** 动作指纹变 → SUPERSEDED 需重审;"记住批准"限完全相同指纹(本任务内);恢复只执行原始快照。
-- **错误:** 审批无超时(EXPIRED 状态预留但 MVP 不启用)。
+### M7 · 人工审批状态机（HITL）
+- **输入：** 治理判定为 REQUIRE_APPROVAL 的动作。
+- **行为：** 任务转 APPROVAL_REQUIRED 暂停，持久化 ApprovalRequest（action_snapshot + fingerprint + rule_id + reason + risk_explanation）；用户裁决后恢复。
+- **输出：** APPROVED → 执行原始动作快照；REJECTED → `APPROVAL_REJECTED` 反馈继续。
+- **边界：** 动作指纹变 → SUPERSEDED 需重审；"记住批准"限完全相同指纹（本任务内）；恢复只执行原始快照。
+- **错误：** 审批无超时（EXPIRED 状态预留但 MVP 不启用）。
 
 ### M8 · 审计与哈希链
-- **输入:** 主循环各阶段事件。
-- **行为:** 每任务 append-only 事件流,event_type 7 类;`hash = SHA256(prev_hash ‖ 规范化本条内容)`;写入前脱敏。
-- **输出:** `audit_events` 记录;`verify_chain(task_id) -> bool` 校验完整性。
-- **边界:** 只做 SHA256 可检测篡改,不做 HMAC 签名(→未来)。
-- **错误:** 链断裂 → verify_chain 返回 False 并指出断点。
+- **输入：** 主循环各阶段事件。
+- **行为：** 每任务 append-only 事件流，event_type 7 类；`hash = SHA256(prev_hash ‖ 规范化本条内容)`；写入前脱敏。
+- **输出：** `audit_events` 记录；`verify_chain(task_id) -> bool` 校验完整性。
+- **边界：** 只做 SHA256 可检测篡改，不做 HMAC 签名（→未来）。
+- **错误：** 链断裂 → verify_chain 返回 False 并指出断点。
 
 ### M9 · 反馈闭环
-- **输入:** ToolResult / 治理判定 / 异常。
-- **行为:** 标准化为统一结构,`detail_for_llm`(截断+脱敏)与 `artifacts`(完整,仅审计/WebUI)分离;失败分类 8 类;精简回灌 + 确定性脱敏 + 重复动作指纹 K=3 判 NO_PROGRESS。
-- **输出:** 写入下一轮上下文的结构化反馈。
-- **边界:** pytest 只回灌失败名 + 断言行 + traceback 末 20 行。
-- **错误:** 只拦完全重复动作,不臆测语义相似。
+- **输入：** ToolResult / 治理判定 / 异常。
+- **行为：** 标准化为统一结构，`detail_for_llm`（截断+脱敏）与 `artifacts`（完整，仅审计/WebUI）分离；失败分类 8 类；精简回灌 + 确定性脱敏 + 重复动作指纹 K=3 判 NO_PROGRESS。
+- **输出：** 写入下一轮上下文的结构化反馈。
+- **边界：** pytest 只回灌失败名 + 断言行 + traceback 末 20 行。
+- **错误：** 只拦完全重复动作，不臆测语义相似。
 
 ### M10 · 记忆与上下文
-- **输入:** 记忆写请求 / 上下文构建请求。
-- **行为:** 三分层(跨会话 Memory / 任务级状态 / 审计);检索 = type + project_id + 关键词 LIKE + last_used_at + topK(无向量库);写入过脱敏器;上下文 6 段优先级装配 + 字符数近似 + 超预算确定性摘要化最旧轮(不调 LLM)。
-- **输出:** memories 记录 / 组装好的上下文。
-- **边界:** Agent 可提议写记忆(source=agent, confirmed=false,仅提示、永不作治理依据)。
-- **错误:** 命中密钥/`.env`/凭据模式 → 拒写或擦除。
+- **输入：** 记忆写请求 / 上下文构建请求。
+- **行为：** 三分层（跨会话 Memory / 任务级状态 / 审计）；检索 = type + project_id + 关键词 LIKE + last_used_at + topK（无向量库）；写入过脱敏器；上下文 6 段优先级装配 + 字符数近似 + 超预算确定性摘要化最旧轮（不调 LLM）。
+- **输出：** memories 记录 / 组装好的上下文。
+- **边界：** Agent 可提议写记忆（source=agent, confirmed=false，仅提示、永不作治理依据）。
+- **错误：** 命中密钥/`.env`/凭据模式 → 拒写或擦除。
 
 ### M11 · 声明式配置
-- **输入:** `aegis.yaml`。
-- **行为:** 代码内置默认 + YAML 覆盖 + 少数环境变量覆盖;加载时 Pydantic 校验;规则由配置驱动(改配置改变判定)。
-- **输出:** 校验通过的配置对象。
-- **边界:** `command_rules` 每条是**扁平结构** `{argv0: str, args_contain: [str], decision}`(argv0 为**单个字符串**,非列表;token 包含匹配;正则→未来);`write_allowlist_dirs` 内写默认 ALLOW。配置模型 **`extra="forbid"`**:未知字段直接报错;`decision` 与 `default_decisions.*` 的取值须是四档枚举之一,否则报错。**危险命令规则(下方 `command_rules` 那 7 条)是 harness 的代码内置默认(secure-by-default):即使不加载任何 `aegis.yaml`,治理规则也已生效**——这兑现 §A.4B"机制是代码而非配置内容",也堵住"省了 config 就静默放行 pip install"的 fail-open。YAML 里若提供 `command_rules`,则**全量替换**该默认(声明式覆盖);出厂 `aegis.yaml` 只是把这份代码默认显式写出以便查看/覆盖。
-- **错误:** 未知字段/类型错/枚举越界 → 启动即报错,不进主循环(`ConfigError`)。环境变量覆盖仅限 `AEGIS_LLM_PROVIDER`、`AEGIS_LLM_MODEL` 两项;`load_config(path, env=None)` 中 `env=None` 时读 `os.environ`。
+- **输入：** `aegis.yaml`。
+- **行为：** 代码内置默认 + YAML 覆盖 + 少数环境变量覆盖；加载时 Pydantic 校验；规则由配置驱动（改配置改变判定）。
+- **输出：** 校验通过的配置对象。
+- **边界：** `command_rules` 每条是**扁平结构** `{argv0: str, args_contain: [str], decision}`（argv0 为**单个字符串**，非列表；token 包含匹配；正则→未来）；`write_allowlist_dirs` 内写默认 ALLOW。配置模型 **`extra="forbid"`**：未知字段直接报错；`decision` 与 `default_decisions.*` 的取值须是四档枚举之一，否则报错。**危险命令规则（下方 `command_rules` 那 7 条）是 harness 的代码内置默认（secure-by-default）：即使不加载任何 `aegis.yaml`，治理规则也已生效**——这兑现 §A.4B"机制是代码而非配置内容"，也堵住"省了 config 就静默放行 pip install"的 fail-open。YAML 里若提供 `command_rules`，则**全量替换**该默认（声明式覆盖）；出厂 `aegis.yaml` 只是把这份代码默认显式写出以便查看/覆盖。
+- **错误：** 未知字段/类型错/枚举越界 → 启动即报错，不进主循环（`ConfigError`）。环境变量覆盖仅限 `AEGIS_LLM_PROVIDER`、`AEGIS_LLM_MODEL` 两项；`load_config(path, env=None)` 中 `env=None` 时读 `os.environ`。
 
-**`aegis.yaml` 结构(八段;数值项凡标注为示例者见 §17.5 未决问题):**
+**`aegis.yaml` 结构（八段；数值项凡标注为示例者见 §17.5 未决问题）：**
 ```yaml
 workspace:
   root: "/workspace"
@@ -244,52 +244,52 @@ llm:
 ```
 
 ### M12 · 凭据管理
-- **输入:** CLI `key set/status/clear`。
-- **行为:** 存储分层 keyring → `.env`(gitignore + chmod600)→ 环境变量;getpass 隐藏录入;`.env` 降级默认关闭(fail-safe)。
-- **输出:** status 只返 `configured` + 掩码,永不明文。
-- **边界:** 容器内 keyring 不可用自动回退环境变量;secret scanning = 自写可单测扫描器 + CI gitleaks。
-- **错误:** 读取失败只报"未配置",异常不打印 key。
+- **输入：** CLI `key set/status/clear`。
+- **行为：** 存储分层 keyring → `.env`(gitignore + chmod600)→ 环境变量；getpass 隐藏录入；`.env` 降级默认关闭（fail-safe）。
+- **输出：** status 只返 `configured` + 掩码，永不明文。
+- **边界：** 容器内 keyring 不可用自动回退环境变量；secret scanning = 自写可单测扫描器 + CI gitleaks。
+- **错误：** 读取失败只报"未配置"，异常不打印 key。
 
 ### M13 · WebUI / REST API
-- **输入:** HTTP 请求。
-- **行为:** 异步执行(POST /tasks 立即返 task_id,后台跑循环,每轮落 SQLite);实时状态用轮询(GET events?since=N);8 端点。
-- **输出:** JSON 响应 / WebUI 页面。
-- **边界:** WebUI 必做=启动+事件流+审批面板+diff+最终状态+审计;前端豁免 Open Design,极简原生。
-- **错误:** credentials/status 掩码不回显;重启不自动续跑但可查看 + 可从 APPROVAL_REQUIRED 恢复。
+- **输入：** HTTP 请求。
+- **行为：** 异步执行（POST /tasks 立即返 task_id，后台跑循环，每轮落 SQLite）；实时状态用轮询（GET events?since=N）；8 端点。
+- **输出：** JSON 响应 / WebUI 页面。
+- **边界：** WebUI 必做=启动+事件流+审批面板+diff+最终状态+审计；前端豁免 Open Design，极简原生。
+- **错误：** credentials/status 掩码不回显；重启不自动续跑但可查看 + 可从 APPROVAL_REQUIRED 恢复。
 
 ### M14 · 分发与部署
-- **输入:** Docker build/run。
-- **行为:** 单一 Docker 形态,推公开 registry,key 运行时注入;workspace 用 `-v` 挂载 /workspace。
-- **输出:** 可运行容器 + 公网 demo URL。
-- **边界:** 云端 demo = 演示沙箱(预置玩具项目 + 最窄允许列表 + MockLLM);主场景本地自带 key 零鉴权。
-- **错误:** key 绝不 COPY/ENV 进镜像层。
+- **输入：** Docker build/run。
+- **行为：** 单一 Docker 形态，推公开 registry,key 运行时注入；workspace 用 `-v` 挂载 /workspace。
+- **输出：** 可运行容器 + 公网 demo URL。
+- **边界：** 云端 demo = 演示沙箱（预置玩具项目 + 最窄允许列表 + MockLLM）；主场景本地自带 key 零鉴权。
+- **错误：** key 绝不 COPY/ENV 进镜像层。
 
 ### M15 · 机制演示
-- **行为:** MockLLM 驱动、零网络的确定性演示脚本/测试。
-- **输出:** 四个演示(见 §16.4)确定性通过。
+- **行为：** MockLLM 驱动、零网络的确定性演示脚本/测试。
+- **输出：** 四个演示（见 §16.4）确定性通过。
 
 ---
 
 ## 7. 非功能性需求
 
-### 7.1 性能(仅量化可确定性测的项)
-- 单个命令执行受 `command_timeout_sec`(默认 30s)超时控制。
-- 工具输出超 `output_max_bytes`(默认 64KiB)被截断,`truncated=true`。
+### 7.1 性能（仅量化可确定性测的项）
+- 单个命令执行受 `command_timeout_sec`（默认 30s）超时控制。
+- 工具输出超 `output_max_bytes`（默认 64KiB）被截断，`truncated=true`。
 - 单轮 LLM 调用失败自动退避重试 3 次。
-- **不设**依赖真实 LLM/环境的响应时间指标(不可确定性测)。
+- **不设**依赖真实 LLM/环境的响应时间指标（不可确定性测）。
 
 ### 7.2 安全
-- 治理护栏、路径围栏、命令词法治理、脱敏器、审批状态机全部为确定性代码,移除真实 LLM 后可单测(见 §16)。
+- 治理护栏、路径围栏、命令词法治理、脱敏器、审批状态机全部为确定性代码，移除真实 LLM 后可单测（见 §16）。
 - 凭据威胁模型见 §12。
-- 云端公网 demo 用演示沙箱限制执行面(见 M14)。
+- 云端公网 demo 用演示沙箱限制执行面（见 M14）。
 
 ### 7.3 可用性
-- 一键 `docker run` 起服务;CLI `demo` 一键跑机制演示;`make test` 一键测试。
-- 冷启动流程在 README 可复现(§4.5 陌生 agent 验证)。
+- 一键 `docker run` 起服务；CLI `demo` 一键跑机制演示；`make test` 一键测试。
+- 冷启动流程在 README 可复现（§4.5 陌生 agent 验证）。
 
 ### 7.4 可观测性
 - 每轮动作/判定/反馈/停机均落 SQLite 并可经 WebUI 查看。
-- 审计事件流带哈希链,可校验完整性。
+- 审计事件流带哈希链，可校验完整性。
 
 ---
 
@@ -319,28 +319,28 @@ AegisCode Harness Core
 ```
 CLI 也调用同一 Application Service / Core。
 
-### 8.2 数据流(单轮)
-构建上下文 → 调 LLM → 解析 1 个 Action → 治理判定(四档)→(REQUIRE_APPROVAL 时暂停等裁决)→ 工具执行 → 反馈分类 + 脱敏回灌 → 落盘(steps / audit_events)→ 停机判定。
+### 8.2 数据流（单轮）
+构建上下文 → 调 LLM → 解析 1 个 Action → 治理判定（四档）→（REQUIRE_APPROVAL 时暂停等裁决）→ 工具执行 → 反馈分类 + 脱敏回灌 → 落盘（steps / audit_events）→ 停机判定。
 
 ### 8.3 外部依赖
-- LLM 供应商:OpenAI-compatible chat completion API / Anthropic messages API(单次补全,不使用其 agent runner)。
-- 运行时:Docker;OS keyring(可选,不可用则降级)。
-- 库:FastAPI、Pydantic v2、标准库 sqlite3、pytest、PyYAML、keyring。
+- LLM 供应商：OpenAI-compatible chat completion API / Anthropic messages API（单次补全，不使用其 agent runner）。
+- 运行时：Docker;OS keyring（可选，不可用则降级）。
+- 库：FastAPI、Pydantic v2、标准库 sqlite3、pytest、PyYAML、keyring。
 
 ---
 
-## 9. 数据模型(SQLite,6 表)
+## 9. 数据模型（SQLite,6 表）
 
 | 表 | 关键字段 |
 |---|---|
 | `tasks` | task_id(PK), workspace_path, workspace_hash(=project_id), task_description, state, termination_reason, step_count, created_at, updated_at |
 | `steps` | step_id(PK), task_id(FK), step_index, action_json, governance_decision, triggered_rule_id, tool_result_json, feedback_category, created_at |
 | `approval_requests` | approval_id(PK), task_id(FK), step_index, action_snapshot_json, action_fingerprint, governance_decision, triggered_rule_id, reason, risk_explanation, state, remember_choice, created_at, decided_at, decided_by |
-| `audit_events` | event_id(PK), task_id(FK), step_index, timestamp, event_type, payload_json(已脱敏), prev_hash, hash |
+| `audit_events` | event_id(PK), task_id(FK), step_index, timestamp, event_type, payload_json（已脱敏）， prev_hash, hash |
 | `memories` | memory_id(PK), project_id, type, key, value, tags_json, source, confirmed, created_at, last_used_at, use_count |
-| `task_snapshots` | snapshot_id(PK), task_id(FK), step_index, file_path, snapshot_path, created_at(回滚索引,Should) |
+| `task_snapshots` | snapshot_id(PK), task_id(FK), step_index, file_path, snapshot_path, created_at（回滚索引，Should） |
 
-**说明:** `steps` 是粗粒度循环状态快照(便于恢复/查询);`audit_events` 是细粒度 append-only 哈希链证据流。凭据(keyring/.env)与配置(YAML)不入库。
+**说明：** `steps` 是粗粒度循环状态快照（便于恢复/查询）；`audit_events` 是细粒度 append-only 哈希链证据流。凭据（keyring/.env）与配置（YAML）不入库。
 
 ## 10. 领域与机制设计（§A.5 要求的独立章节）
 
@@ -371,7 +371,7 @@ CLI 也调用同一 Application Service / Core。
 
 ### 10.5 重点维度与理由
 
-**重点维度 = 治理**（§11 详述）。理由：治理是六维度中确定性代码占比最高、演示最干净、最难用提示词规避的维度，最契合 §A.4(C) 的评分判据。
+**重点维度 = 治理**（§11 详述）。理由：治理是六维度中确定性代码占比最高、演示最干净、最难用提示词规避的维度，最契合 §A.4（C） 的评分判据。
 
 ### 10.6 每个机制如何由确定性代码实现（汇总）
 
@@ -553,7 +553,7 @@ harness 每个核心机制（工具分发、治理拦截、反馈回灌、记忆
 ### 16.4 机制演示（§A.6 硬性，MockLLM 驱动、零网络）
 
 - **演示①（治理拦截危险动作）**：MockLLM 返回 `{tool:run_command, arguments:{command:"rm -rf /"}}`。断言：词法解析 → 命令规则命中 → DENY；工具执行次数=0；文件系统无变化；审计有 GOVERNANCE_DECISION=DENY 带 rule_id；Agent 收到 POLICY_DENIED 反馈。
-- **演示②（失败反馈驱动动作变化）**：预设轮1 write_file(错误实现)→轮2 run_tests→(失败)→轮3 write_file(与轮1不同的修正)→轮4 run_tests→(通过)→轮5 finish。断言：轮2 后 TEST_FAILURE 出现在轮3 传给 MockLLM 的 messages 里；轮3 动作 ≠ 轮1；最终 finish 触发的独立验证通过；**COMPLETED 由最终验证器复跑绿而非 MockLLM 声称**。
+- **演示②（失败反馈驱动动作变化）**：预设轮1 write_file（错误实现）→轮2 run_tests→（失败）→轮3 write_file（与轮1不同的修正）→轮4 run_tests→（通过）→轮5 finish。断言：轮2 后 TEST_FAILURE 出现在轮3 传给 MockLLM 的 messages 里；轮3 动作 ≠ 轮1；最终 finish 触发的独立验证通过；**COMPLETED 由最终验证器复跑绿而非 MockLLM 声称**。
 - **演示③（路径围栏·符号链接逃逸被拒）**：临时工作区内建软链 `evil -> /etc/passwd`；MockLLM 返回 `{tool:read_file, arguments:{path:"evil"}}`。断言：realpath 归属判定失败 → DENY；未读到工作区外内容；审计记录。
 - **演示④（附加·SUPERSEDED 重审）**：体现审批治理深度——动作指纹变化后旧审批失效需重审（确定性单测）。
 
